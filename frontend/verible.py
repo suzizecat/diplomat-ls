@@ -3,12 +3,17 @@ import json
 import typing as T
 
 from .indexer import IndexItems,SimpleIndexer
+from subprocess import Popen, PIPE
 
 class VeribleIndexer(SimpleIndexer) :
 	def __init__(self):
 		super().__init__()
+		self.command_path = "verible-verilog-kythe-extractor"
 
 	def run_indexer(self):
+		process = Popen(["ls", "-la", "."], stdout=PIPE)
+		(output, err) = process.communicate()
+		exit_code = process.wait()
 
 		logdict = dict()
 
