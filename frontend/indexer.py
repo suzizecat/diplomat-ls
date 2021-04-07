@@ -15,6 +15,7 @@ class IndexItems:
 
 class GenericIndexerInterface:
 	def __init__(self):
+		pass
 
 	def run_indexer(self):
 		raise NotImplementedError

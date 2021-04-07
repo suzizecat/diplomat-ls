@@ -4,31 +4,54 @@ import typing as T
 
 from .indexer import IndexItems,SimpleIndexer
 from subprocess import Popen, PIPE
+import tempfile
+
 
 class VeribleIndexer(SimpleIndexer) :
 	def __init__(self):
 		super().__init__()
 		self.command_path = "verible-verilog-kythe-extractor"
+		self.filelist : T.List[str] = list()
+		self.source_root = "/home/julien/Projets/HDL/MPU_KATSV/rtl/sv"
+
+
+	def dump_file_list(self, path):
+		with open(path,"w") as file_handler :
+			file_handler.write("\n".join(self.filelist))
 
 	def run_indexer(self):
-		process = Popen(["ls", "-la", "."], stdout=PIPE)
-		(output, err) = process.communicate()
-		exit_code = process.wait()
 
-		logdict = dict()
+		data = None
+		with tempfile.TemporaryDirectory() as work_dir :
+			filelist = f"{work_dir}/files.fls"
+			self.dump_file_list(filelist)
+			command = [self.command_path,
+							 "--file_list_root",
+							 self.source_root,
+							 "--print_kythe_facts",
+							 "json",
+							 "--file_list_path",
+							 filelist]
+			print(f"Run command {' '.join(command)}")
+			process = Popen(command, stdout=PIPE, stderr=PIPE)
+			(output, err) = process.communicate()
+			exit_code = process.wait()
+
+			if exit_code != 0 or err != b"":
+				print(f"Error when running the indexer. Output code ",exit_code, "\n",err.decode("ascii"))
+				return
+			data = json.loads("[" + output.decode("ascii").replace("}\n{", "},\n{") + "]")
+
+		self.clear()
 
 		raw_dict : T.Dict[str,T.Dict[str,str]] =dict()
 		files : T.Dict[str,str] = dict()
-		with open("/home/julien/Projets/HDL/MPU_KATSV/t.json","r") as f :
-			data = json.loads("[" +
-							  f.read().replace("}\n{", "},\n{") +
-							  "]")
 
 		i = 0
 		for elt in data :
 			i += 1
 			raw_symbul = elt["source"]["signature"]
-			symbol = str(raw_symbul) +" - "+ base64.b64decode(raw_symbul).decode("ascii")
+			symbol = str(raw_symbul) +" - "+ raw_symbul
 
 			fpath =  elt["source"]["path"]
 			if symbol not in raw_dict :
@@ -36,7 +59,7 @@ class VeribleIndexer(SimpleIndexer) :
 				raw_dict[symbol]["file"] = fpath
 
 			fact_name =  elt["fact_name"]
-			value = base64.b64decode(elt["fact_value"]).decode("ascii") if "fact_value" in elt else ""
+			value = elt["fact_value"] if "fact_value" in elt else ""
 			if fact_name == "/kythe/text":
 				files[fpath] = value
 
@@ -47,7 +70,7 @@ class VeribleIndexer(SimpleIndexer) :
 			target = ""
 			if "target" in elt :
 				target = elt["target"]["path"]
-				target += ":"+ base64.b64decode(elt["target"]["signature"]).decode("ascii")
+				target += ":"+ elt["target"]["signature"]
 
 			regfactname = fact_name
 			append = 0
@@ -72,7 +95,8 @@ class VeribleIndexer(SimpleIndexer) :
 
 
 # Press the green button in the gutter to run the script.
-if __name__ == '__main__':
-    run()
+if __name__ == '__main__' :
+	#run()
+	pass
 
 # See PyCharm help at https://www.jetbrains.com/help/pycharm/

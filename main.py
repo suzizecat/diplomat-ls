@@ -56,7 +56,6 @@ class DiplomatLanguageServer(LanguageServer):
 		super().__init__()
 
 
-
 diplomat_server = DiplomatLanguageServer()
 
 def _validate(ls, params):
