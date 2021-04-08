@@ -1,6 +1,63 @@
 import base64
 import json
 import typing as T
+import gc
+from frontend import KytheTree
+import time
+
+def run2() :
+    p = "Z:\\test\\index.json"
+    p = "C:\\Users\\jfaucher\\Desktop\\index.json"
+
+    with open(p, "r") as f:
+        tstart = time.time()
+        print("Reading data...")
+        text = ""
+        tree = KytheTree()
+        gc.disable()
+        i = 0
+        for line in f :
+            text += line
+            if line == "}\n" :
+                data = json.loads(text)
+                tree.add_element(data)
+                text = ""
+                i += 1
+                if (i % 1000 ) == 0:
+                    print(f"Handled {i:6d} elements")
+
+        gc.enable()
+        print(f"Done in {time.time() - tstart}s.")
+        """
+        print("Formatting data...")
+        text = "[" + text.replace("}\n{", "},\n{") + "]"
+        print("Loading JSON...")
+        data = json.loads(text)
+
+        print("Filling tree...")
+
+        for e in data :
+            tree.add_element(e)
+        """
+        print("Resolving tree...")
+        tree.solve_edges()
+
+        print("Processing tree...")
+        anchors = [n for n in tree.nodes.values() if n.facts["/kythe/node/kind"] == "anchor"]
+        for n in anchors:
+            n.text = tree.nodes[n.path].facts["/kythe/text"][
+                     int(n.facts["/kythe/loc/start"]):int(n.facts["/kythe/loc/end"])]
+
+        for n in anchors:
+            text = tree.nodes[n.path].facts["/kythe/text"]
+            start = int(n.facts["/kythe/loc/start"])
+            tline = text[:start].count("\n")
+            tchar = start - text[:start].rfind("\n")
+            n.posstring = f"{n.path}:{tline}:{tchar}"
+
+        print(f"Finished in {time.time() - tstart}s")
+        return tree
+
 
 def run() :
 
@@ -62,6 +119,8 @@ def run() :
 
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
-    run()
+    t = run2()
+    files = [n for n in t.nodes.values() if n.facts["/kythe/node/kind"] == "file"]
+    anchors = [n for n in t.nodes.values() if n.facts["/kythe/node/kind"] == "anchor"]
 
 # See PyCharm help at https://www.jetbrains.com/help/pycharm/
