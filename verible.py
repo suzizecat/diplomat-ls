@@ -20,14 +20,14 @@ def run2() :
             text += line
             if line == "}\n" :
                 data = json.loads(text)
-                tree.add_element(data)
+                tree.add_and_link_element(data)
                 text = ""
                 i += 1
                 if (i % 1000 ) == 0:
                     print(f"Handled {i:6d} elements")
 
         gc.enable()
-        print(f"Done in {time.time() - tstart}s.")
+        print(f"Done {i} elements in {time.time() - tstart}s.")
         """
         print("Formatting data...")
         text = "[" + text.replace("}\n{", "},\n{") + "]"
@@ -119,8 +119,41 @@ def run() :
 
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
+    import os
+    from frontend.indexers import KytheIndexer
+    from urllib.parse import urlunparse, ParseResult, quote as urlquote
+    from pygls.lsp.types import Location, Range, Position
     t = run2()
-    files = [n for n in t.nodes.values() if n.facts["/kythe/node/kind"] == "file"]
-    anchors = [n for n in t.nodes.values() if n.facts["/kythe/node/kind"] == "anchor"]
+    if True :
+        # find_symbol_per_location
+        #find_file = "\\media\\hyadum3p1\\dpt\\adh\\workspace\\easii-ic\\a19011\\users\\jfaucher\\dev_stfe\\input\\sharedrtl\\rtl\\fifo\\sync_fifo_memsp.sv"
+        print("Start lookup")
+        start = time.time()
+        find_file = "\\media\\hyadum3p1\\dpt\\adh\\workspace\\easii-ic\\a19011\\users\\jfaucher\\dev_stfe\\input\\sharedrtl\\rtl\\lvds\\lvds_out.sv"
+        find_line = 30
+        find_selection = (8,24)
+
+        # uri_base = ParseResult(scheme='file', path=urlquote(find_file),netloc="",params="",query="",fragment="")
+        loc = Location(uri=find_file,
+                       range = Range(
+                           start=Position(line=find_line,character=find_selection[0]),
+                           end=Position(line=find_line,character=find_selection[1]))
+                       )
+
+        # loc.range.start.line = find_line
+        # loc.range.start.character = find_selection[0]
+        # loc.range.end.line = find_line
+        # loc.range.end.character = find_selection[1]
+
+        indexer = KytheIndexer()
+        indexer.tree = t
+        indexer.refresh_anchors()
+        indexer.refresh_files()
+
+        refs = indexer.get_refs_from_location(loc)
+        defs = indexer.get_definition_from_location(loc)
+
+        print("Done in ",time.time() - start)
+
 
 # See PyCharm help at https://www.jetbrains.com/help/pycharm/
