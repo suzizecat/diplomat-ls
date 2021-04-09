@@ -2,10 +2,10 @@ import typing as T
 import base64
 import os
 
-
-
-
 class KytheRef:
+
+	test_mode = False
+
 	@classmethod
 	def from_dict(cls,data : T.Dict[str,T.Union[T.Dict[str,str],str]]):
 		ret = cls()
@@ -20,8 +20,7 @@ class KytheRef:
 
 	def read_dict(self, data: T.Dict[str, T.Union[T.Dict[str, str], str]]):
 		self.signature = base64.b64decode(data["signature"]).decode("ascii")
-		# Todo remove normpath in real run
-		self.path = os.path.normpath(data["path"])
+		self.path = os.path.normpath(data["path"]) if KytheRef.test_mode else data["path"]
 		# for file nodes
 		if self.signature == "" :
 			self.signature = self.path

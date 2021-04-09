@@ -2,25 +2,33 @@ import base64
 import json
 import typing as T
 
-from .indexer import IndexItems,SimpleIndexer
+from .indexers import IndexItems,KytheIndexer
 from subprocess import Popen, PIPE
 import tempfile
+import gc
+import time
+
+from vunit.ui import VUnit
 
 
-class VeribleIndexer(SimpleIndexer) :
+class VeribleIndexer(KytheIndexer) :
 	def __init__(self):
 		super().__init__()
 		self.command_path = "verible-verilog-kythe-extractor"
 		self.filelist : T.List[str] = list()
 		self.source_root = "/home/julien/Projets/HDL/MPU_KATSV/rtl/sv"
 
-
 	def dump_file_list(self, path):
 		with open(path,"w") as file_handler :
 			file_handler.write("\n".join(self.filelist))
 
-	def run_indexer(self):
+	def sort_files(self):
+		unit = VUnit("")
+		for f in self.filelist :
+			VUnit.add_source_file(file_name=f,library_name="work")
+		self.filelist = [f.name for f in VUnit.get_compile_order()]
 
+	def run_indexer(self):
 		data = None
 		with tempfile.TemporaryDirectory() as work_dir :
 			filelist = f"{work_dir}/files.fls"
@@ -40,58 +48,34 @@ class VeribleIndexer(SimpleIndexer) :
 			if exit_code != 0 or err != b"":
 				print(f"Error when running the indexer. Output code ",exit_code, "\n",err.decode("ascii"))
 				return
-			data = json.loads("[" + output.decode("ascii").replace("}\n{", "},\n{") + "]")
 
-		self.clear()
+			self.clear()
+			self.read_index_file(filelist)
 
-		raw_dict : T.Dict[str,T.Dict[str,str]] =dict()
-		files : T.Dict[str,str] = dict()
+	def read_index_file(self, index_path):
+		with open(index_path, "r") as f:
+			tstart = time.time()
+			print("Reading data...")
+			text = ""
 
-		i = 0
-		for elt in data :
-			i += 1
-			raw_symbul = elt["source"]["signature"]
-			symbol = str(raw_symbul) +" - "+ raw_symbul
+			gc.disable()
+			i = 0
+			for line in f:
+				text += line
+				if line == "}\n":
+					data = json.loads(text)
+					self.tree.add_and_link_element(data)
+					text = ""
+					i += 1
+					if (i % 1000) == 0:
+						print(f"Handled {i:6d} elements")
 
-			fpath =  elt["source"]["path"]
-			if symbol not in raw_dict :
-				raw_dict[symbol] = dict()
-				raw_dict[symbol]["file"] = fpath
-
-			fact_name =  elt["fact_name"]
-			value = elt["fact_value"] if "fact_value" in elt else ""
-			if fact_name == "/kythe/text":
-				files[fpath] = value
-
-			if fact_name == "/" and "edge_kind" in elt :
-				fact_name = f"{elt['edge_kind']}"
-
-
-			target = ""
-			if "target" in elt :
-				target = elt["target"]["path"]
-				target += ":"+ elt["target"]["signature"]
-
-			regfactname = fact_name
-			append = 0
-			while f"{regfactname}" in raw_dict[symbol] :
-				append += 1
-				regfactname = f"{fact_name}{append}"
-
-			raw_dict[symbol][regfactname] = value if value != "" else target
-
-			print(f"{i:>4d} {fact_name:32s} - {symbol:50s} = {value} [{target}]")
-
-		for name, symb in raw_dict.items() :
-			print(name)
-			for k in symb:
-				print(f"\t{k:30s} : {symb[k]}")
-			if "/kythe/node/kind" in symb and symb["/kythe/node/kind"] == "anchor" :
-				beg = int(symb["/kythe/loc/start"])
-				end = int(symb["/kythe/loc/end"])
-				content = files[symb["file"]][beg:end]
-				print(f"\t{'text':30s} : {content}")
-
+			gc.enable()
+		print(f"Done {i} elements in {time.time() - tstart}s.")
+		print("Resolving tree...")
+		self.tree.solve_edges()
+		self.refresh_files()
+		self.refresh_anchors()
 
 
 # Press the green button in the gutter to run the script.

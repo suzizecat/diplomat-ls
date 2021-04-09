@@ -32,3 +32,6 @@ class GenericIndexerInterface:
 
 	def get_refs_from_location(self, position : Location) -> T.List[Location]:
 		raise NotImplementedError
+
+	def clear(self):
+		raise NotImplementedError

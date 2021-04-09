@@ -20,8 +20,8 @@ class KytheLocation:
 	def range_from_anchor(self, anchor : KytheNode):
 		if anchor.kind != "anchor" :
 			raise WrongNodeKindError
-		self.start = int(anchor.facts["/kythe/loc/start"])
-		self.end   = int(anchor.facts["/kythe/loc/end"])
+		self.start = int(anchor.facts["/kythe/loc/start"]) -1
+		self.end   = int(anchor.facts["/kythe/loc/end"]) -1
 
 
 	@property
@@ -38,7 +38,10 @@ class KytheLocation:
 
 	@property
 	def start_char(self) -> int:
-		return self.start - self._filetext.rindex("\n",0,self.start)
+		try :
+			return self.start - self._filetext.rindex("\n",0,self.start)
+		except ValueError:
+			return  self.start
 
 	@property
 	def end_line(self) -> int:
@@ -46,7 +49,10 @@ class KytheLocation:
 
 	@property
 	def end_char(self) -> int:
-		return self.end - self._filetext.rindex("\n",0,self.end)
+		try :
+			return self.end - self._filetext.rindex("\n",0,self.end)
+		except ValueError:
+			return self.end
 
 
 class KytheIndexer(GenericIndexerInterface):
@@ -56,6 +62,11 @@ class KytheIndexer(GenericIndexerInterface):
 		self.tree : KytheTree = KytheTree()
 		self.anchors : T.List[KytheNode]   = list()
 		self.files : T.Dict[str,KytheNode] = dict()
+
+	def clear(self):
+		self.tree.clear()
+		self.anchors.clear()
+		self.files.clear()
 
 	def run_indexer(self):
 		raise NotImplementedError
@@ -160,4 +171,5 @@ class KytheIndexer(GenericIndexerInterface):
 				ret = text.find("\n",ret + 1)
 		ret += col
 		return ret
+
 
