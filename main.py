@@ -19,11 +19,12 @@ import time
 import uuid
 import typing as T
 import os
-from typing import Optional
+from typing import Optional, Any
 import logging
 from pygls.lsp.methods import (COMPLETION, TEXT_DOCUMENT_DID_CHANGE,
 							   TEXT_DOCUMENT_DID_CLOSE, TEXT_DOCUMENT_DID_OPEN,REFERENCES,DEFINITION,
-							   WORKSPACE_DID_CHANGE_CONFIGURATION)
+							   WORKSPACE_DID_CHANGE_CONFIGURATION, WINDOW_WORK_DONE_PROGRESS_CREATE)
+
 from pygls.lsp.types import (CompletionItem, CompletionList, CompletionOptions,
 							 CompletionParams, ConfigurationItem,
 							 ConfigurationParams, Diagnostic, ReferenceParams,
@@ -31,26 +32,47 @@ from pygls.lsp.types import (CompletionItem, CompletionList, CompletionOptions,
 							 DidCloseTextDocumentParams,
 							 DidOpenTextDocumentParams, MessageType, Position,
 							 Range, Registration, RegistrationParams,
-							 Unregistration, UnregistrationParams, Location, DeclarationParams)
+							 Unregistration, UnregistrationParams, Location, DeclarationParams,
+							 WorkDoneProgressBegin,WorkDoneProgressEnd, WorkDoneProgressReport, ProgressToken,
+							 WorkDoneProgressParams,WorkDoneProgressCreateParams)
 
 
+from pygls.lsp.types import  Model
 from pygls.server import LanguageServer
+
+from urllib.parse import unquote
+
+
+
 from frontend import VeribleIndexer
 
 logger = logging.getLogger(__name__)
 logger.setLevel(10)
 
+# Add this until we update pygls models
+class ProgressParams(Model):
+	token: ProgressToken
+	value: Any
+
+
 class DiplomatLanguageServer(LanguageServer):
-	CMD_INDEX_WORKSPACE = 'indexWorkspace'
+	CMD_INDEX_WORKSPACE = 'diplomat-server.reindex'
 	CMD_GET_CONFIGURATION = "diplomat-server.get-configuration"
+	CMD_REORDER = "diplomat-server.reorder-files"
 	CMD_REINDEX = 'diplomat-server.full-index'
+	CMD_TST_PROGRESS_STRT = 'diplomat-server.test.start-progress'
+	CMD_TST_PROGRESS_STOP = 'diplomat-server.test.stop-progress'
+
 	CONFIGURATION_SECTION = 'diplomatServer'
 
 	def __init__(self):
 		super().__init__()
 		self.index_path = ""
+		self.flist_path = ""
+		self.skip_index = False
 		self.indexed = False
 		self.svindexer = VeribleIndexer()
+		self.progress_uuid = None
 
 
 
@@ -92,12 +114,10 @@ diplomat_server = DiplomatLanguageServer()
 def declaration(ls : DiplomatLanguageServer,params : DeclarationParams) -> Location :
 	if not ls.indexed :
 		reindex_all(ls)
-	uri_source = params.text_document.uri.replace(ls.workspace.root_uri,".")
+	uri_source = unquote(params.text_document.uri)
 	ref_range = Range(start=params.position,
 					  end=params.position)
 	ret = ls.svindexer.get_definition_from_location(Location(uri=uri_source, range=ref_range))
-	if ret is not None :
-		ret.uri = ret.uri.replace("file:///.", ls.workspace.root_uri)
 	return ret
 
 @diplomat_server.feature(REFERENCES)
@@ -105,13 +125,10 @@ def references(ls : DiplomatLanguageServer ,params : ReferenceParams) -> T.List[
 	"""Returns completion items."""
 	if not ls.indexed :
 		reindex_all(ls)
-	uri_source = params.text_document.uri.replace(ls.workspace.root_uri,".")
+	uri_source = unquote(params.text_document.uri)
 	ref_range = Range(start=params.position,
 					  end=params.position)
-
 	ret = ls.svindexer.get_refs_from_location(Location(uri=uri_source,range=ref_range))
-	for r in ret :
-		r.uri = r.uri.replace("file:///.",ls.workspace.root_uri)
 	return ret
 
 
@@ -143,10 +160,15 @@ def get_client_config(ls: DiplomatLanguageServer, *args):
 				scope_uri='',
 				section=DiplomatLanguageServer.CONFIGURATION_SECTION)
 		])).result(2)[0]
-
+		t = ls.client_capabilities
 		vbend = config["backend"]["verilog"]
 		svbend = config["backend"]["systemVerilog"]
 		ls.index_path = config["indexFilePath"]
+
+		ls.flist_path = config["fileListPath"]
+		ls.skip_index = config["usePrebuiltIndex"]
+		if not os.path.isabs(ls.flist_path) :
+			ls.flist_path =  os.path.abspath(os.path.normpath(os.path.join(ls.workspace.root_path,ls.flist_path)))
 
 		ls.show_message(f'Verilog : {vbend}\nSV : {svbend}')
 
@@ -154,14 +176,104 @@ def get_client_config(ls: DiplomatLanguageServer, *args):
 		ls.show_message_log(f'Error ocurred: {e}')
 		print("Error :" , str(e))
 
+
 @diplomat_server.thread()
 @diplomat_server.command(DiplomatLanguageServer.CMD_REINDEX)
 def reindex_all(ls : DiplomatLanguageServer, *args):
-	print(f"Reindex using file {os.path.abspath(ls.index_path)}")
 	ls.svindexer.clear()
-	ls.svindexer.read_index_file(ls.index_path)
+	print(f"Filelist :  {os.path.abspath(ls.flist_path)}")
+	if not ls.skip_index :
+		print(f"Reindex using file {os.path.abspath(ls.flist_path)}")
+		ls.svindexer.read_file_list(ls.flist_path)
+		ls.svindexer.run_indexer()
+	else :
+		print(f"Reindex using file {os.path.abspath(ls.index_path)}")
+		ls.svindexer.read_index_file(ls.index_path)
+
 	ls.indexed = True
 	ls.show_message("Indexing done")
+
+@diplomat_server.thread()
+@diplomat_server.command(DiplomatLanguageServer.CMD_REORDER)
+def reorder(ls : DiplomatLanguageServer, *args):
+	print(f"Reorder filelist")
+	ls.svindexer.filelist = [ d.path for d in ls.workspace.documents.values() ]
+	ls.svindexer.sort_files()
+	ls.show_message("File sorting done")
+
+
+@diplomat_server.command(DiplomatLanguageServer.CMD_TST_PROGRESS_STRT)
+def on_start_progress(ls : DiplomatLanguageServer, *args):
+	initiate_progress(ls)
+	print("Start progress on uuid",ls.progress_uuid)
+	ls.send_notification("$/progress",WorkDoneProgressParams(token=ls.progress_uuid,value=WorkDoneProgressBegin(kind="begin",title = "Working hard")))
+
+
+@diplomat_server.command(DiplomatLanguageServer.CMD_TST_PROGRESS_STOP)
+def on_stop_progress(ls : DiplomatLanguageServer, *args):
+	print("Stop progress")
+
+	ls.send_notification("$/progress",WorkDoneProgressParams(token=ls.progress_uuid, value=WorkDoneProgressEnd(kind="end",message = "Stuff done.")))
+
+@diplomat_server.command(WINDOW_WORK_DONE_PROGRESS_CREATE)
+def initiate_progress(ls : DiplomatLanguageServer, *args) -> ProgressToken:
+	ls.progress_uuid = uuid.uuid4().int
+
+	return ls.progress_uuid
+
+
+# @diplomat_server.command(DiplomatLanguageServer.CMD_TST_PROGRESS_STRT)
+# async def on_progress_show(ls: DiplomatLanguageServer, *args):
+# 	progress_token = uuid.uuid4().int
+#
+# 	# Tell the client to create a progress bar
+# 	await ls.lsp.send_request_async(
+# 		WINDOW_WORK_DONE_PROGRESS_CREATE,
+# 		WorkDoneProgressCreateParams(
+# 			token=progress_token
+# 		)
+# 	)
+#
+# 	# Begin
+# 	ls.send_notification(
+# 		'$/progress',
+# 		ProgressParams(
+# 			token=progress_token,
+# 			value=WorkDoneProgressBegin(
+# 				kind='begin',   # <- for some reason you need to pass "kind" (this is a serialization issue that needs to be addressed)
+# 				title='Begin',
+# 				percentage=0
+# 			)
+# 		)
+# 	)
+#
+# 	for i in range(1, 10):
+# 		ls.send_notification(
+# 			'$/progress',
+# 			ProgressParams(
+# 				token=progress_token,
+# 				value=WorkDoneProgressReport(
+# 					kind='report',
+# 					message=f'Message {i}',
+# 					percentage= i * 10
+# 				)
+# 			)
+# 		)
+#
+# 		await asyncio.sleep(2)
+#
+#
+# 	ls.send_notification(
+# 		'$/progress',
+# 		ProgressParams(
+# 			token=progress_token,
+# 			value=WorkDoneProgressEnd(
+# 				kind='end',
+# 				message='End',
+# 			)
+# 		)
+# 	)
+
 
 # @diplomat_server.thread()
 # @diplomat_server.command(WORKSPACE_DID_CHANGE_CONFIGURATION)

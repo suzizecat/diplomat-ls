@@ -1,11 +1,13 @@
 import typing as T
 from pygls.lsp.types import Location, Range, Position
+
+from pygls import uris
 from urllib.parse import unquote, quote as urlquote, urlparse, urlunparse, ParseResult
 
 from .generic_indexer import GenericIndexerInterface
 from .kythe import KytheTree
 from .kythe import KytheNode
-
+import os
 
 class WrongNodeKindError(RuntimeError):
 	pass
@@ -72,6 +74,7 @@ class KytheIndexer(GenericIndexerInterface):
 		raise NotImplementedError
 
 	def refresh_files(self):
+
 		self.files.clear()
 		self.files = {n.path:n for n in self.tree.nodes.values() if n.kind == "file"}
 
@@ -134,7 +137,7 @@ class KytheIndexer(GenericIndexerInterface):
 			return anchor
 
 	def get_file_from_location(self,loc : Location) -> KytheNode:
-		path = unquote(urlparse(loc.uri).path)
+		path = loc.uri
 		return self.files[path]
 
 	def _lsp_to_kythe_location(self, loc : Location) -> KytheLocation:
@@ -147,14 +150,15 @@ class KytheIndexer(GenericIndexerInterface):
 		return kloc
 
 	def _kythe_to_lsp_location(self, kloc : KytheLocation) -> Location:
-		uri_base = ParseResult(scheme='file',path=urlquote(kloc.path),netloc="",params="",query="",fragment="")
+
+		uri_base = kloc.path
 
 		start_line = kloc.start_line
 		start_character = kloc.start_char
 		end_line = kloc.end_line
 		end_character = kloc.end_char
 
-		loc = Location(uri=urlunparse(uri_base),
+		loc = Location(uri=uri_base,
 					   range=Range(
 						   start=Position(line=start_line, character=start_character),
 						   end=Position(line=end_line, character=end_character))

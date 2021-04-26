@@ -3,10 +3,14 @@ import json
 import typing as T
 
 from .indexers import IndexItems,KytheIndexer
+from .indexers import KytheRef
 from subprocess import Popen, PIPE
 import tempfile
 import gc
 import time
+
+import os
+
 
 from vunit.ui import VUnit
 
@@ -18,15 +22,27 @@ class VeribleIndexer(KytheIndexer) :
 		self.filelist : T.List[str] = list()
 		self.source_root = "/home/julien/Projets/HDL/MPU_KATSV/rtl/sv"
 
+	def clear(self):
+		super().clear()
+		self.filelist.clear()
+
 	def dump_file_list(self, path):
 		with open(path,"w") as file_handler :
 			file_handler.write("\n".join(self.filelist))
 
+	def read_file_list(self,path):
+		with open(path,"r",newline="") as flist :
+			for f in flist :
+				self.filelist.append(f)
+
 	def sort_files(self):
-		unit = VUnit("")
+		vu = VUnit.from_argv()
+		vu.add_verification_components()
+		lib = vu.add_library("lib")
+
 		for f in self.filelist :
-			VUnit.add_source_file(file_name=f,library_name="work")
-		self.filelist = [f.name for f in VUnit.get_compile_order()]
+			lib.add_source_file(file_name=f)
+		self.filelist = [f.name for f in vu.get_compile_order()]
 
 	def run_indexer(self):
 		data = None
@@ -54,6 +70,7 @@ class VeribleIndexer(KytheIndexer) :
 
 	def read_index_file(self, index_path):
 		with open(index_path, "r") as f:
+			KytheRef.root_path = os.path.dirname(os.path.abspath(index_path))
 			tstart = time.time()
 			print("Reading data...")
 			text = ""

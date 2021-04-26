@@ -1,10 +1,12 @@
 import typing as T
 import base64
 import os
+from pygls import uris
 
 class KytheRef:
 
 	test_mode = False
+	root_path: str = "."
 
 	@classmethod
 	def from_dict(cls,data : T.Dict[str,T.Union[T.Dict[str,str],str]]):
@@ -15,8 +17,17 @@ class KytheRef:
 
 	def __init__(self):
 		self.signature: str = None
-		self.path: str = None
+		self._path: str = None
+
 		# self.language: str = None
+
+	@property
+	def path(self):
+		return self._path
+
+	@path.setter
+	def path(self,val):
+		self._path = uris.from_fs_path(os.path.abspath(os.path.join(self.root_path,val)))
 
 	def read_dict(self, data: T.Dict[str, T.Union[T.Dict[str, str], str]]):
 		self.signature = base64.b64decode(data["signature"]).decode("ascii")
