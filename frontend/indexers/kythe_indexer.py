@@ -64,6 +64,7 @@ class KytheIndexer(GenericIndexerInterface):
 		self.tree : KytheTree = KytheTree()
 		self.anchors : T.List[KytheNode]   = list()
 		self.files : T.Dict[str,KytheNode] = dict()
+		self.workspace_root : str = "."
 
 	def clear(self):
 		self.tree.clear()

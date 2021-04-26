@@ -20,7 +20,7 @@ class VeribleIndexer(KytheIndexer) :
 		super().__init__()
 		self.command_path = "verible-verilog-kythe-extractor"
 		self.filelist : T.List[str] = list()
-		self.source_root = "/home/julien/Projets/HDL/MPU_KATSV/rtl/sv"
+		self.exec_root = ""
 
 	def clear(self):
 		super().clear()
@@ -49,30 +49,33 @@ class VeribleIndexer(KytheIndexer) :
 		with tempfile.TemporaryDirectory() as work_dir :
 			filelist = f"{work_dir}/files.fls"
 			self.dump_file_list(filelist)
-			command = [self.command_path,
+			command = [self.exec_root+self.command_path,
 							 "--file_list_root",
-							 self.source_root,
+							 self.workspace_root,
 							 "--print_kythe_facts",
 							 "json",
 							 "--file_list_path",
 							 filelist]
 			print(f"Run command {' '.join(command)}")
-			process = Popen(command, stdout=PIPE, stderr=PIPE)
-			(output, err) = process.communicate()
-			exit_code = process.wait()
+			index_path = f"{work_dir}/index.json"
+			with open(index_path,"w") as index_file :
+				process = Popen(command, stdout=index_file, stderr=PIPE)
+				(t,err) = process.communicate()
+
+				exit_code = process.wait()
 
 			if exit_code != 0 or err != b"":
 				print(f"Error when running the indexer. Output code ",exit_code, "\n",err.decode("ascii"))
 				return
 
 			self.clear()
-			self.read_index_file(filelist)
+			self.read_index_file(index_path)
 
 	def read_index_file(self, index_path):
 		with open(index_path, "r") as f:
 			KytheRef.root_path = os.path.dirname(os.path.abspath(index_path))
 			tstart = time.time()
-			print("Reading data...")
+			print(f"Reading data from {index_path}...")
 			text = ""
 
 			gc.disable()

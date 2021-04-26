@@ -161,16 +161,20 @@ def get_client_config(ls: DiplomatLanguageServer, *args):
 				section=DiplomatLanguageServer.CONFIGURATION_SECTION)
 		])).result(2)[0]
 		t = ls.client_capabilities
-		vbend = config["backend"]["verilog"]
-		svbend = config["backend"]["systemVerilog"]
+		ls.svindexer.exec_root = config["backend"]["veribleInstallPath"]
+		ls.svindexer.exec_root += "/" if ls.svindexer.exec_root != "" and ls.svindexer.exec_root[-1] not in ["\\","/"] else ""
 		ls.index_path = config["indexFilePath"]
 
 		ls.flist_path = config["fileListPath"]
+		if not os.path.isabs(ls.flist_path) :
+			ls.flist_path = os.path.normpath(os.path.join(ls.workspace.root_path,ls.flist_path))
+
+		ls.svindexer.workspace_root = os.path.dirname(os.path.abspath(ls.flist_path))
 		ls.skip_index = config["usePrebuiltIndex"]
+
 		if not os.path.isabs(ls.flist_path) :
 			ls.flist_path =  os.path.abspath(os.path.normpath(os.path.join(ls.workspace.root_path,ls.flist_path)))
 
-		ls.show_message(f'Verilog : {vbend}\nSV : {svbend}')
 
 	except Exception as e:
 		ls.show_message_log(f'Error ocurred: {e}')
