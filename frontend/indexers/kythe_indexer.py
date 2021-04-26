@@ -43,7 +43,7 @@ class KytheLocation:
 		try :
 			return self.start - self._filetext.rindex("\n",0,self.start)
 		except ValueError:
-			return  self.start
+			return  self.start +1
 
 	@property
 	def end_line(self) -> int:
@@ -54,7 +54,7 @@ class KytheLocation:
 		try :
 			return self.end - self._filetext.rindex("\n",0,self.end)
 		except ValueError:
-			return self.end
+			return self.end +1
 
 
 class KytheIndexer(GenericIndexerInterface):

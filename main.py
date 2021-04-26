@@ -22,7 +22,7 @@ import os
 from typing import Optional, Any
 import logging
 from pygls.lsp.methods import (COMPLETION, TEXT_DOCUMENT_DID_CHANGE,
-							   TEXT_DOCUMENT_DID_CLOSE, TEXT_DOCUMENT_DID_OPEN,REFERENCES,DEFINITION,
+							   TEXT_DOCUMENT_DID_CLOSE, TEXT_DOCUMENT_DID_SAVE,REFERENCES,DEFINITION,
 							   WORKSPACE_DID_CHANGE_CONFIGURATION, WINDOW_WORK_DONE_PROGRESS_CREATE)
 
 from pygls.lsp.types import (CompletionItem, CompletionList, CompletionOptions,
@@ -34,7 +34,7 @@ from pygls.lsp.types import (CompletionItem, CompletionList, CompletionOptions,
 							 Range, Registration, RegistrationParams,
 							 Unregistration, UnregistrationParams, Location, DeclarationParams,
 							 WorkDoneProgressBegin,WorkDoneProgressEnd, WorkDoneProgressReport, ProgressToken,
-							 WorkDoneProgressParams,WorkDoneProgressCreateParams)
+							 WorkDoneProgressParams,WorkDoneProgressCreateParams, DidSaveTextDocumentParams)
 
 
 from pygls.lsp.types import  Model
@@ -78,38 +78,6 @@ class DiplomatLanguageServer(LanguageServer):
 
 diplomat_server = DiplomatLanguageServer()
 
-# @diplomat_server.thread()
-# @diplomat_server.feature(WORKSPACE_CONFIGURATION)
-# def configure(ls):
-# 	try:
-# 		config = ls.get_configuration(ConfigurationParams(items=[
-# 			ConfigurationItem(
-# 				scope_uri='',
-# 				section=DiplomatLanguageServer.CONFIGURATION_SECTION)
-# 		])).result(2)
-#
-# 		vbend = config[0].get('backend.verilog')
-# 		svbend = config[0].get('backend.systemVerilog')
-#
-# 		ls.show_message(f'Verilog : {vbend}\nSV : {svbend}')
-#
-# 	except Exception as e:
-# 		ls.show_message_log(f'Error ocurred: {e}')
-
-# @diplomat_server.feature(COMPLETION, CompletionOptions(trigger_characters=[',']))
-# def completions(params: Optional[CompletionParams] = None) -> CompletionList:
-# 	"""Returns completion items."""
-# 	return CompletionList(
-# 		is_incomplete=False,
-# 		items=[
-# 			CompletionItem(label='"'),
-# 			CompletionItem(label='['),
-# 			CompletionItem(label=']'),
-# 			CompletionItem(label='{'),
-# 			CompletionItem(label='}'),
-# 		]
-# 	)
-
 @diplomat_server.feature(DEFINITION)
 def declaration(ls : DiplomatLanguageServer,params : DeclarationParams) -> Location :
 	if not ls.indexed :
@@ -132,9 +100,10 @@ def references(ls : DiplomatLanguageServer ,params : ReferenceParams) -> T.List[
 	return ret
 
 
-# @diplomat_server.feature(TEXT_DOCUMENT_DID_CHANGE)
-# def did_change(ls, params: DidChangeTextDocumentParams):
-# 	"""Text document did change notification."""
+@diplomat_server.feature(TEXT_DOCUMENT_DID_SAVE)
+def did_change(ls, params: DidSaveTextDocumentParams):
+	"""Text document did change notification."""
+	reindex_all(ls)
 
 
 @diplomat_server.feature(TEXT_DOCUMENT_DID_CLOSE)
@@ -204,26 +173,6 @@ def reorder(ls : DiplomatLanguageServer, *args):
 	ls.svindexer.filelist = [ d.path for d in ls.workspace.documents.values() ]
 	ls.svindexer.sort_files()
 	ls.show_message("File sorting done")
-
-
-@diplomat_server.command(DiplomatLanguageServer.CMD_TST_PROGRESS_STRT)
-def on_start_progress(ls : DiplomatLanguageServer, *args):
-	initiate_progress(ls)
-	print("Start progress on uuid",ls.progress_uuid)
-	ls.send_notification("$/progress",WorkDoneProgressParams(token=ls.progress_uuid,value=WorkDoneProgressBegin(kind="begin",title = "Working hard")))
-
-
-@diplomat_server.command(DiplomatLanguageServer.CMD_TST_PROGRESS_STOP)
-def on_stop_progress(ls : DiplomatLanguageServer, *args):
-	print("Stop progress")
-
-	ls.send_notification("$/progress",WorkDoneProgressParams(token=ls.progress_uuid, value=WorkDoneProgressEnd(kind="end",message = "Stuff done.")))
-
-@diplomat_server.command(WINDOW_WORK_DONE_PROGRESS_CREATE)
-def initiate_progress(ls : DiplomatLanguageServer, *args) -> ProgressToken:
-	ls.progress_uuid = uuid.uuid4().int
-
-	return ls.progress_uuid
 
 
 # @diplomat_server.command(DiplomatLanguageServer.CMD_TST_PROGRESS_STRT)

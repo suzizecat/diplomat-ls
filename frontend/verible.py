@@ -81,14 +81,13 @@ class VeribleIndexer(KytheIndexer) :
 			gc.disable()
 			i = 0
 			for line in f:
-				text += line
-				if line == "}\n":
-					data = json.loads(text)
-					self.tree.add_and_link_element(data)
-					text = ""
-					i += 1
-					if (i % 1000) == 0:
-						print(f"Handled {i:6d} elements")
+				if line.strip() == "" :
+					continue
+				data = json.loads(line)
+				self.tree.add_and_link_element(data)
+				i += 1
+				if (i % 1000) == 0:
+					print(f"Handled {i:6d} elements")
 
 			gc.enable()
 		print(f"Done {i} elements in {time.time() - tstart}s.")
