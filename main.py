@@ -249,5 +249,3 @@ def reorder(ls : DiplomatLanguageServer, *args):
 # 	else:
 # 		ls.show_message('Error happened during completions registration.',
 # 						MessageType.Error)
-
-logger.info("Start server")
