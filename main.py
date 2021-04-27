@@ -43,7 +43,7 @@ from urllib.parse import unquote
 
 from frontend import VeribleIndexer
 
-logger = logging.getLogger()
+logger = logging.getLogger("myLogger")
 
 
 # Add this until we update pygls models
@@ -141,6 +141,9 @@ def get_client_config(ls: DiplomatLanguageServer, *args):
 
 		if not os.path.isabs(ls.flist_path) :
 			ls.flist_path =  os.path.abspath(os.path.normpath(os.path.join(ls.workspace.root_path,ls.flist_path)))
+
+		logger.info(f"FList path : {ls.flist_path}")
+		logger.info(f"WS root path : {ls.svindexer.workspace_root}")
 
 
 	except Exception as e:

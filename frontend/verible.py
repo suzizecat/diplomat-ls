@@ -12,10 +12,10 @@ import time
 import os
 import logging
 
-from vunit.ui import VUnit
+# bfrom vunit.ui import VUnit
 
 
-logger = logging.getLogger()
+logger = logging.getLogger("myLogger")
 
 class VeribleIndexer(KytheIndexer) :
 	def __init__(self):
@@ -38,13 +38,14 @@ class VeribleIndexer(KytheIndexer) :
 				self.filelist.append(f)
 
 	def sort_files(self):
-		vu = VUnit.from_argv()
-		vu.add_verification_components()
-		lib = vu.add_library("lib")
-
-		for f in self.filelist :
-			lib.add_source_file(file_name=f)
-		self.filelist = [f.name for f in vu.get_compile_order()]
+		# vu = VUnit.from_argv()
+		# vu.add_verification_components()
+		# lib = vu.add_library("lib")
+		#
+		# for f in self.filelist :
+		# 	lib.add_source_file(file_name=f)
+		# self.filelist = [f.name for f in vu.get_compile_order()]
+		pass
 
 	def run_indexer(self):
 		data = None

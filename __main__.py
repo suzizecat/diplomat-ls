@@ -2,11 +2,15 @@ import argparse
 from main import diplomat_server
 import logging
 
-logger = logging.getLogger()
+logger = logging.getLogger("myLogger")
 # Log to file handler
 log_file_handler = logging.FileHandler("run.log", "w")
 log_file_handler.setLevel(logging.DEBUG)
 logger.addHandler(log_file_handler)
+
+log_srv_handler = logging.FileHandler("run.srv.log", "w")
+log_srv_handler.setLevel(logging.DEBUG)
+
 # Log to stdout handler
 stream_handler = logging.StreamHandler()
 stream_handler.setLevel(logging.DEBUG)
@@ -30,6 +34,10 @@ def add_arguments(parser : argparse.ArgumentParser):
 		"-v", dest="verbosity", default=0, action="count",
 		help="Verbosity level. Add a v to increase, up to -vvv"
 	)
+	parser.add_argument(
+		"--full-log", action="store_true",
+		help="Enable logging of server transaction"
+	)
 
 def main():
 
@@ -37,6 +45,11 @@ def main():
 	parser = argparse.ArgumentParser()
 	add_arguments(parser)
 	args = parser.parse_args()
+
+	if args.full_log :
+		server_logger = logging.getLogger()
+		server_logger.addHandler(log_srv_handler)
+
 
 	if args.verbosity > 0 :
 		level = max(logging.ERROR - 10*args.verbosity, logging.DEBUG)

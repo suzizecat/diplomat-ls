@@ -7,7 +7,7 @@ from frontend import KytheTree, KytheRef
 import time
 import logging
 
-logger = logging.getLogger()
+logger = logging.getLogger("myLogger")
 
 def run2() :
 	KytheRef.test_mode = True
