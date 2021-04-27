@@ -10,10 +10,12 @@ import gc
 import time
 
 import os
-
+import logging
 
 from vunit.ui import VUnit
 
+
+logger = logging.getLogger()
 
 class VeribleIndexer(KytheIndexer) :
 	def __init__(self):
@@ -56,7 +58,7 @@ class VeribleIndexer(KytheIndexer) :
 							 "json",
 							 "--file_list_path",
 							 filelist]
-			print(f"Run command {' '.join(command)}")
+			logger.info(f"Run indexer command {' '.join(command)}")
 			index_path = f"{work_dir}/index.json"
 			with open(index_path,"w") as index_file :
 				process = Popen(command, stdout=index_file, stderr=PIPE)
@@ -65,7 +67,7 @@ class VeribleIndexer(KytheIndexer) :
 				exit_code = process.wait()
 
 			if exit_code != 0 or err != b"":
-				print(f"Error when running the indexer. Output code ",exit_code, "\n",err.decode("ascii"))
+				logger.error(f"Error when running the indexer. Output code ",exit_code, "\n",err.decode("ascii"))
 				return
 
 			self.clear()
@@ -75,7 +77,7 @@ class VeribleIndexer(KytheIndexer) :
 		with open(index_path, "r") as f:
 			KytheRef.root_path = os.path.dirname(os.path.abspath(index_path))
 			tstart = time.time()
-			print(f"Reading data from {index_path}...")
+			logger.info(f"Reading data from {index_path}...")
 			text = ""
 
 			gc.disable()
@@ -87,11 +89,11 @@ class VeribleIndexer(KytheIndexer) :
 				self.tree.add_and_link_element(data)
 				i += 1
 				if (i % 1000) == 0:
-					print(f"Handled {i:6d} elements")
+					logger.debug(f"Handled {i:6d} elements")
 
 			gc.enable()
-		print(f"Done {i} elements in {time.time() - tstart}s.")
-		print("Resolving tree...")
+		logger.debug(f"Done {i} elements in {time.time() - tstart}s.")
+		logger.info("Resolving tree...")
 		self.tree.solve_edges()
 		self.refresh_files()
 		self.refresh_anchors()

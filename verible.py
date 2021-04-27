@@ -5,6 +5,9 @@ import typing as T
 import gc
 from frontend import KytheTree, KytheRef
 import time
+import logging
+
+logger = logging.getLogger()
 
 def run2() :
 	KytheRef.test_mode = True
@@ -13,7 +16,7 @@ def run2() :
 
 	with open(p, "r") as f:
 		tstart = time.time()
-		print("Reading data...")
+		logger.debug("Reading data...")
 		text = ""
 		tree = KytheTree()
 		gc.disable()

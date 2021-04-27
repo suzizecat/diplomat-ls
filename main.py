@@ -14,9 +14,6 @@
 # See the License for the specific language governing permissions and      #
 # limitations under the License.                                           #
 ############################################################################
-import asyncio
-import time
-import uuid
 import typing as T
 import os
 from typing import Optional, Any
@@ -46,8 +43,8 @@ from urllib.parse import unquote
 
 from frontend import VeribleIndexer
 
-logger = logging.getLogger(__name__)
-logger.setLevel(10)
+logger = logging.getLogger()
+
 
 # Add this until we update pygls models
 class ProgressParams(Model):
@@ -103,6 +100,7 @@ def references(ls : DiplomatLanguageServer ,params : ReferenceParams) -> T.List[
 @diplomat_server.feature(TEXT_DOCUMENT_DID_SAVE)
 def did_change(ls, params: DidSaveTextDocumentParams):
 	"""Text document did change notification."""
+	ls.indexed = False
 	reindex_all(ls)
 
 
@@ -121,7 +119,7 @@ def did_close(server: DiplomatLanguageServer, params: DidCloseTextDocumentParams
 @diplomat_server.thread()
 @diplomat_server.command(DiplomatLanguageServer.CMD_GET_CONFIGURATION)
 def get_client_config(ls: DiplomatLanguageServer, *args):
-	print("Refresh configuration")
+	logger.debug("Refresh configuration")
 	ls.show_message("Configuration requested")
 	try:
 		config = ls.get_configuration(ConfigurationParams(items=[
@@ -147,20 +145,18 @@ def get_client_config(ls: DiplomatLanguageServer, *args):
 
 	except Exception as e:
 		ls.show_message_log(f'Error ocurred: {e}')
-		print("Error :" , str(e))
 
 
 @diplomat_server.thread()
 @diplomat_server.command(DiplomatLanguageServer.CMD_REINDEX)
 def reindex_all(ls : DiplomatLanguageServer, *args):
 	ls.svindexer.clear()
-	print(f"Filelist :  {os.path.abspath(ls.flist_path)}")
 	if not ls.skip_index :
-		print(f"Reindex using file {os.path.abspath(ls.flist_path)}")
+		ls.show_message_log(f"Reindex using file {os.path.abspath(ls.flist_path)}")
 		ls.svindexer.read_file_list(ls.flist_path)
 		ls.svindexer.run_indexer()
 	else :
-		print(f"Reindex using file {os.path.abspath(ls.index_path)}")
+		ls.show_message_log(f"Reindex using file {os.path.abspath(ls.index_path)}")
 		ls.svindexer.read_index_file(ls.index_path)
 
 	ls.indexed = True
@@ -169,7 +165,7 @@ def reindex_all(ls : DiplomatLanguageServer, *args):
 @diplomat_server.thread()
 @diplomat_server.command(DiplomatLanguageServer.CMD_REORDER)
 def reorder(ls : DiplomatLanguageServer, *args):
-	print(f"Reorder filelist")
+	logger.debug(f"Reorder filelist")
 	ls.svindexer.filelist = [ d.path for d in ls.workspace.documents.values() ]
 	ls.svindexer.sort_files()
 	ls.show_message("File sorting done")
@@ -254,5 +250,4 @@ def reorder(ls : DiplomatLanguageServer, *args):
 # 		ls.show_message('Error happened during completions registration.',
 # 						MessageType.Error)
 
-print("Start server")
-diplomat_server.start_tcp('localhost', 8080)
+logger.info("Start server")
