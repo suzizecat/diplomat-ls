@@ -47,16 +47,32 @@ class VeribleIndexer(KytheIndexer) :
 		# self.filelist = [f.name for f in vu.get_compile_order()]
 		pass
 
+
+	@property
+	def incdir_list(self):
+		incdir_list = {os.path.dirname(f) for f in self.filelist}
+		ret = list()
+		for p in incdir_list :
+			if os.path.isabs(p) :
+				ret.append(p)
+			else:
+				ret.append(os.path.join(self.workspace_root,p))
+		return ret
+
 	def run_indexer(self):
 		data = None
 		with tempfile.TemporaryDirectory() as work_dir :
 			filelist = f"{work_dir}/files.fls"
 			self.dump_file_list(filelist)
+			incdir_list = ",".join(self.incdir_list)
+
 			command = [self.exec_root+self.command_path,
 							 "--file_list_root",
 							 self.workspace_root,
 							 "--print_kythe_facts",
 							 "json",
+					        "--include_dir_paths",
+					        incdir_list,
 							 "--file_list_path",
 							 filelist]
 			logger.info(f"Run indexer command {' '.join(command)}")
