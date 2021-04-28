@@ -42,10 +42,13 @@ def add_arguments(parser : argparse.ArgumentParser):
 		"--full-log", action="store_true",
 		help="Enable logging of server transaction"
 	)
+	parser.add_argument(
+		"--debug", action="store_true",
+		help="Avoid catching errors to let them show up on logs"
+	)
+
 
 def main():
-
-
 	parser = argparse.ArgumentParser()
 	add_arguments(parser)
 	args = parser.parse_args()
@@ -54,12 +57,11 @@ def main():
 		server_logger = logging.getLogger()
 		server_logger.addHandler(log_srv_handler)
 
-
 	if args.verbosity > 0 :
 		level = max(logging.ERROR - 10*args.verbosity, logging.DEBUG)
 		logging.root.setLevel(level)
 
-
+	diplomat_server.debug = args.debug
 	if args.tcp :
 		logger.addHandler(stream_handler)
 		logger.info(f"Start server on TCP port {args.port}")

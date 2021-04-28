@@ -10,7 +10,6 @@ class Capabilities(Flag) :
 class GenericFrontend:
 	def __init__(self):
 		self.capabilities : Capabilities = None
-		self.object
 
 	def run_index(self, filelist : T.List[str]) :
 		raise NotImplementedError

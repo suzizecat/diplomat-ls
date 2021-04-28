@@ -17,13 +17,15 @@
 import typing as T
 import os
 from typing import Optional, Any
+import functools
+import threading
 import logging
-from pygls.lsp.methods import (COMPLETION, TEXT_DOCUMENT_DID_CHANGE,
+from pygls.lsp.methods import (COMPLETION, TEXT_DOCUMENT_DID_CHANGE, TEXT_DOCUMENT_DID_OPEN,
 							   TEXT_DOCUMENT_DID_CLOSE, TEXT_DOCUMENT_DID_SAVE,REFERENCES,DEFINITION,
 							   WORKSPACE_DID_CHANGE_CONFIGURATION, WINDOW_WORK_DONE_PROGRESS_CREATE)
 
 from pygls.lsp.types import (CompletionItem, CompletionList, CompletionOptions,
-							 CompletionParams, ConfigurationItem,
+							 CompletionParams, ConfigurationItem, DidOpenTextDocumentParams,
 							 ConfigurationParams, Diagnostic, ReferenceParams,
 							 DidChangeTextDocumentParams,
 							 DidCloseTextDocumentParams,
@@ -35,10 +37,11 @@ from pygls.lsp.types import  Model
 from pygls.server import LanguageServer
 
 from urllib.parse import unquote
-
+from pygls import uris
 
 
 from frontend import VeribleIndexer
+from frontend import VeribleSyntaxChecker
 
 logger = logging.getLogger("myLogger")
 
@@ -65,12 +68,31 @@ class DiplomatLanguageServer(LanguageServer):
 		self.flist_path = ""
 		self.skip_index = False
 		self.indexed = False
+		self.configured = False
 		self.svindexer = VeribleIndexer()
+		self.syntaxchecker = VeribleSyntaxChecker()
 		self.progress_uuid = None
+		self.debug = False
+		self.check_syntax = True
 
+	@property
+	def have_syntax_error(self):
+		return self.syntaxchecker.nberrors > 0
+
+	def syntax_check(self,file : str):
+		if file is not None :
+			f = uris.to_fs_path(file)
+			self.syntaxchecker.run_incremental([f])
+		else :
+			self.syntaxchecker.run()
+
+		for file,diaglist in self.syntaxchecker.diagnostic_content.items() :
+			self.publish_diagnostics(file,diaglist)
 
 
 diplomat_server = DiplomatLanguageServer()
+
+
 
 @diplomat_server.feature(DEFINITION)
 def declaration(ls : DiplomatLanguageServer,params : DeclarationParams) -> Location :
@@ -81,6 +103,7 @@ def declaration(ls : DiplomatLanguageServer,params : DeclarationParams) -> Locat
 					  end=params.position)
 	ret = ls.svindexer.get_definition_from_location(Location(uri=uri_source, range=ref_range))
 	return ret
+
 
 @diplomat_server.feature(REFERENCES)
 def references(ls : DiplomatLanguageServer ,params : ReferenceParams) -> T.List[Location]:
@@ -95,72 +118,80 @@ def references(ls : DiplomatLanguageServer ,params : ReferenceParams) -> T.List[
 
 
 @diplomat_server.feature(TEXT_DOCUMENT_DID_SAVE)
-def did_change(ls, params: DidSaveTextDocumentParams):
+def did_save(ls: DiplomatLanguageServer, params: DidSaveTextDocumentParams):
 	"""Text document did change notification."""
 	ls.indexed = False
-	reindex_all(ls)
+	if ls.check_syntax :
+		ls.syntax_check(params.text_document.uri)
+	if ls.syntaxchecker.nberrors == 0 :
+		reindex_all(ls)
 
 
 @diplomat_server.feature(TEXT_DOCUMENT_DID_CLOSE)
 def did_close(server: DiplomatLanguageServer, params: DidCloseTextDocumentParams):
 	"""Text document did close notification."""
-	server.show_message('Text Document Did Close')
+	pass
 
-#
-# @diplomat_server.feature(TEXT_DOCUMENT_DID_OPEN)
-# async def did_open(ls, params: DidOpenTextDocumentParams):
-# 	"""Text document did open notification."""
-# 	ls.show_message('Text Document Did Open')
-#
+@diplomat_server.thread()
+@diplomat_server.feature(TEXT_DOCUMENT_DID_OPEN)
+def did_open(ls : DiplomatLanguageServer, params : DidOpenTextDocumentParams):
+	"""Text document did open notification."""
+	if ls.configured :
+		ls.syntax_check(params.text_document.uri)
+
+
 
 @diplomat_server.thread()
 @diplomat_server.command(DiplomatLanguageServer.CMD_GET_CONFIGURATION)
 def get_client_config(ls: DiplomatLanguageServer, *args):
 	logger.debug("Refresh configuration")
 	ls.show_message("Configuration requested")
-	try:
-		config = ls.get_configuration(ConfigurationParams(items=[
-			ConfigurationItem(
-				scope_uri='',
-				section=DiplomatLanguageServer.CONFIGURATION_SECTION)
-		])).result(2)[0]
-		t = ls.client_capabilities
-		ls.svindexer.exec_root = config["backend"]["veribleInstallPath"]
-		ls.svindexer.exec_root += "/" if ls.svindexer.exec_root != "" and ls.svindexer.exec_root[-1] not in ["\\","/"] else ""
-		ls.index_path = config["indexFilePath"]
 
-		ls.flist_path = config["fileListPath"]
-		if not os.path.isabs(ls.flist_path) :
-			ls.flist_path = os.path.normpath(os.path.join(ls.workspace.root_path,ls.flist_path))
+	config = ls.get_configuration(ConfigurationParams(items=[
+		ConfigurationItem(
+			scope_uri='',
+			section=DiplomatLanguageServer.CONFIGURATION_SECTION)
+	])).result(2)[0]
+	logger.debug("Got configuration back")
+	verible_root = config["backend"]["veribleInstallPath"]
+	verible_root += "/" if verible_root != "" and verible_root[-1] not in ["\\","/"] else ""
+	ls.svindexer.exec_root = verible_root
+	ls.syntaxchecker.executable = f"{verible_root}verible-verilog-syntax"
+	ls.index_path = config["indexFilePath"]
 
-		ls.svindexer.workspace_root = os.path.dirname(os.path.abspath(ls.flist_path))
-		ls.skip_index = config["usePrebuiltIndex"]
+	ls.flist_path = config["fileListPath"]
+	if not os.path.isabs(ls.flist_path) :
+		ls.flist_path = os.path.normpath(os.path.join(ls.workspace.root_path,ls.flist_path))
 
-		if not os.path.isabs(ls.flist_path) :
-			ls.flist_path =  os.path.abspath(os.path.normpath(os.path.join(ls.workspace.root_path,ls.flist_path)))
+	ls.svindexer.workspace_root = os.path.dirname(os.path.abspath(ls.flist_path))
+	ls.skip_index = config["usePrebuiltIndex"]
 
-		logger.info(f"FList path : {ls.flist_path}")
-		logger.info(f"WS root path : {ls.svindexer.workspace_root}")
+	if not os.path.isabs(ls.flist_path) :
+		ls.flist_path =  os.path.abspath(os.path.normpath(os.path.join(ls.workspace.root_path,ls.flist_path)))
 
-
-	except Exception as e:
-		ls.show_message_log(f'Error ocurred: {e}')
+	logger.info(f"FList path : {ls.flist_path}")
+	logger.info(f"WS root path : {ls.svindexer.workspace_root}")
+	ls.configured = True
 
 
 @diplomat_server.thread()
 @diplomat_server.command(DiplomatLanguageServer.CMD_REINDEX)
 def reindex_all(ls : DiplomatLanguageServer, *args):
-	ls.svindexer.clear()
-	if not ls.skip_index :
-		ls.show_message_log(f"Reindex using file {os.path.abspath(ls.flist_path)}")
-		ls.svindexer.read_file_list(ls.flist_path)
-		ls.svindexer.run_indexer()
+	if not ls.configured :
+		ls.show_message("You need to update server configuration before indexing")
+		ls.show_message_log(f"Trying to reindex without configuration")
 	else :
-		ls.show_message_log(f"Reindex using file {os.path.abspath(ls.index_path)}")
-		ls.svindexer.read_index_file(ls.index_path)
+		ls.svindexer.clear()
+		if not ls.skip_index :
+			ls.show_message_log(f"Reindex using file {os.path.abspath(ls.flist_path)}")
+			ls.svindexer.read_file_list(ls.flist_path)
+			ls.svindexer.run_indexer()
+		else :
+			ls.show_message_log(f"Reindex using file {os.path.abspath(ls.index_path)}")
+			ls.svindexer.read_index_file(ls.index_path)
 
-	ls.indexed = True
-	ls.show_message("Indexing done")
+		ls.indexed = True
+		ls.show_message("Indexing done")
 
 @diplomat_server.thread()
 @diplomat_server.command(DiplomatLanguageServer.CMD_REORDER)
