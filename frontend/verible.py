@@ -68,7 +68,9 @@ class VeribleIndexer(KytheIndexer) :
 				exit_code = process.wait()
 
 			if exit_code != 0 or err != b"":
-				logger.error(f"Error when running the indexer. Output code ",exit_code, "\n",err.decode("ascii"))
+				err_string = f"Error when running the indexer. Output code {exit_code}\n{err.decode('ascii')}"
+				for line in err_string.split("\n") :
+					logger.error(line)
 				return
 
 			self.clear()

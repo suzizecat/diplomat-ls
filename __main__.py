@@ -4,11 +4,15 @@ import logging
 
 logger = logging.getLogger("myLogger")
 # Log to file handler
+formatter = logging.Formatter("{levelname:8s} {asctime:s} - {message}", style="{")
+
 log_file_handler = logging.FileHandler("run.log", "w")
+log_file_handler.setFormatter(formatter)
 log_file_handler.setLevel(logging.DEBUG)
 logger.addHandler(log_file_handler)
 
 log_srv_handler = logging.FileHandler("run.srv.log", "w")
+log_srv_handler.setFormatter(formatter)
 log_srv_handler.setLevel(logging.DEBUG)
 
 # Log to stdout handler

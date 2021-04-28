@@ -1,3 +1,4 @@
+import logging
 import typing as T
 from pygls.lsp.types import Location, Range, Position
 
@@ -8,6 +9,8 @@ from .generic_indexer import GenericIndexerInterface
 from .kythe import KytheTree
 from .kythe import KytheNode
 import os
+import logging
+logger = logging.getLogger("myLogger")
 
 class WrongNodeKindError(RuntimeError):
 	pass
@@ -139,7 +142,11 @@ class KytheIndexer(GenericIndexerInterface):
 
 	def get_file_from_location(self,loc : Location) -> KytheNode:
 		path = loc.uri
-		return self.files[path]
+		try :
+			return self.files[path]
+		except KeyError as e:
+			logger.error(f"Internal file not found : {path}.\nAvailable are :\n    " + "\n    ".join(sorted(self.files.keys())))
+			raise e
 
 	def _lsp_to_kythe_location(self, loc : Location) -> KytheLocation:
 		kloc = KytheLocation()

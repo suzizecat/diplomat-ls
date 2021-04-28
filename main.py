@@ -27,11 +27,8 @@ from pygls.lsp.types import (CompletionItem, CompletionList, CompletionOptions,
 							 ConfigurationParams, Diagnostic, ReferenceParams,
 							 DidChangeTextDocumentParams,
 							 DidCloseTextDocumentParams,
-							 DidOpenTextDocumentParams, MessageType, Position,
-							 Range, Registration, RegistrationParams,
-							 Unregistration, UnregistrationParams, Location, DeclarationParams,
-							 WorkDoneProgressBegin,WorkDoneProgressEnd, WorkDoneProgressReport, ProgressToken,
-							 WorkDoneProgressParams,WorkDoneProgressCreateParams, DidSaveTextDocumentParams)
+							 Range, Location, DeclarationParams,
+							 DidSaveTextDocumentParams)
 
 
 from pygls.lsp.types import  Model
@@ -47,9 +44,9 @@ logger = logging.getLogger("myLogger")
 
 
 # Add this until we update pygls models
-class ProgressParams(Model):
-	token: ProgressToken
-	value: Any
+# class ProgressParams(Model):
+# 	token: ProgressToken
+# 	value: Any
 
 
 class DiplomatLanguageServer(LanguageServer):
@@ -227,12 +224,11 @@ def reorder(ls : DiplomatLanguageServer, *args):
 # 	)
 
 
-# @diplomat_server.thread()
-# @diplomat_server.command(WORKSPACE_DID_CHANGE_CONFIGURATION)
-# def on_workspace_did_change_configuration(ls : DiplomatLanguageServer, *args) :
-# 	print("WS config change notif")
-# 	print(args)
-# 	get_client_config(ls)
+@diplomat_server.thread()
+@diplomat_server.command(WORKSPACE_DID_CHANGE_CONFIGURATION)
+def on_workspace_did_change_configuration(ls : DiplomatLanguageServer, *args) :
+	logger.info("WS config change notif")
+	get_client_config(ls)
 
 
 # @diplomat_server.command(DiplomatLanguageServer.CMD_REGISTER_COMPLETIONS)
