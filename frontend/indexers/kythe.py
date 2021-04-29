@@ -1,6 +1,7 @@
 import typing as T
 import base64
 import os
+import sqlite3
 from pygls import uris
 
 class KytheRef:
@@ -31,10 +32,12 @@ class KytheRef:
 
 	def read_dict(self, data: T.Dict[str, T.Union[T.Dict[str, str], str]]):
 		self.signature = base64.b64decode(data["signature"]).decode("ascii")
-		self.path = os.path.normpath(data["path"]) if KytheRef.test_mode else data["path"]
+
+		loc_path = os.path.normpath(data["path"]) if KytheRef.test_mode else data["path"]
+		self.path = loc_path
 		# for file nodes
 		if self.signature == "" :
-			self.signature = self.path
+			self.signature = f"{loc_path}#"
 
 
 class KytheNode(KytheRef):
@@ -51,9 +54,11 @@ class KytheNode(KytheRef):
 		self.link_source : T.List[KytheEdge] = list()
 		self.link_target : T.List[KytheEdge] = list()
 
+		self.id : int = None
+
 	@property
 	def kind(self):
-		return self.facts["/kythe/node/kind"]
+		return self.facts["/kythe/node/kind"] if "/kythe/node/kind" in self.facts else None
 
 	def read_dict(self, data : T.Dict[str,T.Union[T.Dict[str,str],str]]):
 		source = data["source"]
@@ -103,11 +108,50 @@ class KytheEdge:
 
 
 class KytheTree:
-	def __init__(self):
+	SQL_ROOT_PATH = os.path.join(os.path.dirname(__file__), "sql")
+
+	def __init__(self, sql_db = ":memory:"):
 		self.nodes : T.Dict[str, KytheNode] = dict()
 		self.edges : T.List[KytheEdge]      = list()
-
+		self.files : T.Dict[str,T.Optional[int]] = dict()
 		self.unsolved_edges : T.List[KytheEdge] = list()
+
+		self.db = sqlite3.connect(sql_db)
+		self.db.row_factory = sqlite3.Row
+
+		self._sql_create_db()
+
+	def __del__(self):
+		self.db.close()
+
+	def _sql_create_db(self):
+		with open(f"{self.SQL_ROOT_PATH}/create_db.sql", "r") as f:
+			with self.db :
+				self.db.executescript(f.read())
+
+	def _sql_delete_db(self):
+		with open(f"{self.SQL_ROOT_PATH}/delete_db.sql", "r") as f:
+			with self.db:
+				self.db.executescript(f.read())
+
+	def _sql_node_get_anchor_id(self,node : KytheNode) -> T.Union[int,None]:
+		ret : sqlite3.Row = self.db.execute("SELECT anchor FROM nodes WHERE id = ?",[node.id]).fetchone()
+		return ret["anchor"] if ret is not None else None
+
+	def _sql_get_node_id_from_signatures(self,sig : T.List[str]) -> T.Dict[str,int]:
+		req =f"SELECT id, signature FROM nodes WHERE signature IN ({','.join(['?' for f in sig])})"
+		ret: T.List[sqlite3.Row] = self.db.execute(req, sig).fetchall()
+		if ret is None :
+			raise KeyError
+		return {r['signature']:r['id'] for r in ret}
+
+	def _sql_set_anchor(self,anchor_id,target_id):
+		with self.db :
+			self.db.execute("UPDATE nodes SET anchor=? WHERE id=?",[anchor_id,target_id])
+
+	def sql_clear(self):
+		self._sql_delete_db()
+		self._sql_create_db()
 
 	def clear(self):
 		self.nodes.clear()
@@ -124,6 +168,60 @@ class KytheTree:
 				return edge.source
 		return None
 
+	def _sql_add_edge(self,edge : KytheEdge):
+		source = edge.source if isinstance(edge.source,str) else edge.source.signature
+		target = edge.target if isinstance(edge.target, str) else edge.target.signature
+
+		idmap = self._sql_get_node_id_from_signatures([source,target])
+
+		if source not in idmap or target not in idmap :
+			# todo log error
+			print(f"Skip edge {source} -> {target}")
+			return
+
+		data= [idmap[source],idmap[target],edge.kind]
+		with self.db :
+			self.db.execute("INSERT INTO edges (source,target,kind) VALUES (?,?,?)",data)
+
+		if edge.kind ==	'/kythe/edge/defines/binding' :
+				self._sql_set_anchor(anchor_id=data[0],target_id=data[1])
+
+	def _sql_add_file(self,uri : str):
+		with self.db:
+			if uri not in self.files :
+				self.db.execute("INSERT INTO files (path) VALUES (?)", [uri])
+				self.files[uri] = self.db.execute("SELECT id FROM files WHERE path=?",[uri]).fetchone()['id']
+
+	def _sql_add_node(self,node : KytheNode) -> int:
+		with self.db :
+			self._sql_add_file(node.path)
+			return self.db.execute("INSERT INTO nodes (signature,file_id) VALUES (?,?)",
+								   [node.signature,self.files[node.path]]).lastrowid
+
+	def _sql_add_node_fact(self,node_id, fact,value) -> T.Union[int,None]:
+		with self.db:
+			if fact == "/kythe/node/kind" :
+				self.db.execute("UPDATE nodes SET kind=? WHERE id=?",[value,node_id])
+				return None
+			else :
+				return self.db.execute("INSERT INTO facts (node,name,val) VALUES (?,?,?)",
+									   [node_id,fact,value]).lastrowid
+
+	def sql_add_element(self,data : T.Dict[str,T.Union[T.Dict[str,str],str]]):
+		print("Add SQL element")
+		if data["fact_name"] == "/":
+			#  We have an edge
+			edge = KytheEdge.from_dict(data)
+			self._sql_add_edge(edge)
+		else:
+			node = KytheNode.from_dict(data)
+			try :
+				node_id = self._sql_get_node_id_from_signatures([node.signature])[node.signature]
+			except KeyError :
+				node_id = self._sql_add_node(node)
+			for key, val in node.facts.items():
+				self._sql_add_node_fact(node_id,key,val)
+
 	def add_element(self,data : T.Dict[str,T.Union[T.Dict[str,str],str]]):
 		if data["fact_name"] == "/" :
 			#  We have an edge
@@ -132,6 +230,7 @@ class KytheTree:
 			self.unsolved_edges.append(self.edges[-1])
 		else:
 			node = KytheNode.from_dict(data)
+
 			if node.signature not in self.nodes :
 				self.nodes[node.signature] = node
 			else :

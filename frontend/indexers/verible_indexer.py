@@ -2,8 +2,8 @@ import base64
 import json
 import typing as T
 
-from .indexers import IndexItems,KytheIndexer
-from .indexers import KytheRef
+from frontend.indexers import IndexItems,KytheIndexer
+from frontend.indexers import KytheRef
 from subprocess import Popen, PIPE
 import tempfile
 import gc
@@ -18,8 +18,8 @@ import logging
 logger = logging.getLogger("myLogger")
 
 class VeribleIndexer(KytheIndexer) :
-	def __init__(self):
-		super().__init__()
+	def __init__(self, sql_db : str = ":memory:"):
+		super().__init__(sql_db)
 		self.command_path = "verible-verilog-kythe-extractor"
 		self.filelist : T.List[str] = list()
 		self.exec_root = ""
@@ -106,6 +106,7 @@ class VeribleIndexer(KytheIndexer) :
 					continue
 				data = json.loads(line)
 				self.tree.add_and_link_element(data)
+				self.tree.sql_add_element(data)
 				i += 1
 				if (i % 1000) == 0:
 					logger.debug(f"Handled {i:6d} elements")

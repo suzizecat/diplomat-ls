@@ -1,5 +1,5 @@
 from .indexers import KytheTree
 from .indexers import KytheRef
 
-from .verible import VeribleIndexer
+from frontend.indexers.verible_indexer import VeribleIndexer
 from .checkers import VeribleSyntaxChecker

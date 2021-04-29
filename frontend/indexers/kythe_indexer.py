@@ -61,10 +61,10 @@ class KytheLocation:
 
 
 class KytheIndexer(GenericIndexerInterface):
-	def __init__(self):
+	def __init__(self,sql_db : str = ":memory:"):
 		super().__init__()
 
-		self.tree : KytheTree = KytheTree()
+		self.tree : KytheTree = KytheTree(sql_db)
 		self.anchors : T.List[KytheNode]   = list()
 		self.files : T.Dict[str,KytheNode] = dict()
 		self.workspace_root : str = "."

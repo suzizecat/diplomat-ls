@@ -22,7 +22,7 @@ import threading
 import logging
 from pygls.lsp.methods import (COMPLETION, TEXT_DOCUMENT_DID_CHANGE, TEXT_DOCUMENT_DID_OPEN,
 							   TEXT_DOCUMENT_DID_CLOSE, TEXT_DOCUMENT_DID_SAVE,REFERENCES,DEFINITION,
-							   WORKSPACE_DID_CHANGE_CONFIGURATION, WINDOW_WORK_DONE_PROGRESS_CREATE)
+							   WORKSPACE_DID_CHANGE_CONFIGURATION, WINDOW_WORK_DONE_PROGRESS_CREATE, INITIALIZED)
 
 from pygls.lsp.types import (CompletionItem, CompletionList, CompletionOptions,
 							 CompletionParams, ConfigurationItem, DidOpenTextDocumentParams,
@@ -30,7 +30,7 @@ from pygls.lsp.types import (CompletionItem, CompletionList, CompletionOptions,
 							 DidChangeTextDocumentParams,
 							 DidCloseTextDocumentParams,
 							 Range, Location, DeclarationParams,
-							 DidSaveTextDocumentParams)
+							 DidSaveTextDocumentParams, InitializedParams)
 
 
 from pygls.lsp.types import  Model
@@ -92,8 +92,14 @@ class DiplomatLanguageServer(LanguageServer):
 
 diplomat_server = DiplomatLanguageServer()
 
+# @diplomat_server.feature(INITIALIZED)
+# def on_initialized(ls : DiplomatLanguageServer,params : InitializedParams) :
+# 	get_client_config(ls)
+# 	ls.show_message_log("Diplomat server is initialized.")
+# 	return None
 
 
+@diplomat_server.thread()
 @diplomat_server.feature(DEFINITION)
 def declaration(ls : DiplomatLanguageServer,params : DeclarationParams) -> Location :
 	if not ls.indexed :
@@ -105,6 +111,7 @@ def declaration(ls : DiplomatLanguageServer,params : DeclarationParams) -> Locat
 	return ret
 
 
+@diplomat_server.thread()
 @diplomat_server.feature(REFERENCES)
 def references(ls : DiplomatLanguageServer ,params : ReferenceParams) -> T.List[Location]:
 	"""Returns completion items."""
@@ -145,7 +152,7 @@ def did_open(ls : DiplomatLanguageServer, params : DidOpenTextDocumentParams):
 @diplomat_server.command(DiplomatLanguageServer.CMD_GET_CONFIGURATION)
 def get_client_config(ls: DiplomatLanguageServer, *args):
 	logger.debug("Refresh configuration")
-	ls.show_message("Configuration requested")
+	ls.show_message_log("Configuration requested")
 
 	config = ls.get_configuration(ConfigurationParams(items=[
 		ConfigurationItem(
@@ -153,6 +160,7 @@ def get_client_config(ls: DiplomatLanguageServer, *args):
 			section=DiplomatLanguageServer.CONFIGURATION_SECTION)
 	])).result(2)[0]
 	logger.debug("Got configuration back")
+	ls.show_message_log("Got client configuration.")
 	verible_root = config["backend"]["veribleInstallPath"]
 	verible_root += "/" if verible_root != "" and verible_root[-1] not in ["\\","/"] else ""
 	ls.svindexer.exec_root = verible_root
@@ -169,6 +177,8 @@ def get_client_config(ls: DiplomatLanguageServer, *args):
 	if not os.path.isabs(ls.flist_path) :
 		ls.flist_path =  os.path.abspath(os.path.normpath(os.path.join(ls.workspace.root_path,ls.flist_path)))
 
+	ls.show_message_log(f"   FList path : {ls.flist_path}")
+	ls.show_message_log(f"   WS root path : {ls.svindexer.workspace_root}")
 	logger.info(f"FList path : {ls.flist_path}")
 	logger.info(f"WS root path : {ls.svindexer.workspace_root}")
 	ls.configured = True
