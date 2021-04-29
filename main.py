@@ -20,7 +20,7 @@ from typing import Optional, Any
 import functools
 import threading
 import logging
-from pygls.lsp.methods import (COMPLETION, TEXT_DOCUMENT_DID_CHANGE, TEXT_DOCUMENT_DID_OPEN,
+from pygls.lsp.methods import (COMPLETION, TEXT_DOCUMENT_DID_CHANGE, TEXT_DOCUMENT_DID_OPEN, INITIALIZED,
 							   TEXT_DOCUMENT_DID_CLOSE, TEXT_DOCUMENT_DID_SAVE,REFERENCES,DEFINITION,
 							   WORKSPACE_DID_CHANGE_CONFIGURATION, WINDOW_WORK_DONE_PROGRESS_CREATE)
 
@@ -30,7 +30,8 @@ from pygls.lsp.types import (CompletionItem, CompletionList, CompletionOptions,
 							 DidChangeTextDocumentParams,
 							 DidCloseTextDocumentParams,
 							 Range, Location, DeclarationParams,
-							 DidSaveTextDocumentParams)
+							 DidSaveTextDocumentParams,
+							 InitializedParams)
 
 
 from pygls.lsp.types import  Model
@@ -92,7 +93,10 @@ class DiplomatLanguageServer(LanguageServer):
 
 diplomat_server = DiplomatLanguageServer()
 
-
+@diplomat_server.feature(INITIALIZED)
+async def on_initialized(ls : DiplomatLanguageServer,params : InitializedParams) :
+	await get_client_config(ls)
+	ls.show_message_log("Diplomat server is initialized.")
 
 @diplomat_server.feature(DEFINITION)
 def declaration(ls : DiplomatLanguageServer,params : DeclarationParams) -> Location :
@@ -139,20 +143,17 @@ def did_open(ls : DiplomatLanguageServer, params : DidOpenTextDocumentParams):
 	if ls.configured :
 		ls.syntax_check(params.text_document.uri)
 
-
-
-@diplomat_server.thread()
 @diplomat_server.command(DiplomatLanguageServer.CMD_GET_CONFIGURATION)
-def get_client_config(ls: DiplomatLanguageServer, *args):
+async def get_client_config(ls: DiplomatLanguageServer, *args):
 	logger.debug("Refresh configuration")
 	ls.show_message("Configuration requested")
 
-	config = ls.get_configuration(ConfigurationParams(items=[
+	config = await ls.get_configuration(ConfigurationParams(items=[
 		ConfigurationItem(
 			scope_uri='',
 			section=DiplomatLanguageServer.CONFIGURATION_SECTION)
 	])).result(2)[0]
-	logger.debug("Got configuration back")
+	ls.show_message_log("Got configuration back")
 	verible_root = config["backend"]["veribleInstallPath"]
 	verible_root += "/" if verible_root != "" and verible_root[-1] not in ["\\","/"] else ""
 	ls.svindexer.exec_root = verible_root
@@ -255,7 +256,6 @@ def reorder(ls : DiplomatLanguageServer, *args):
 # 	)
 
 
-@diplomat_server.thread()
 @diplomat_server.command(WORKSPACE_DID_CHANGE_CONFIGURATION)
 def on_workspace_did_change_configuration(ls : DiplomatLanguageServer, *args) :
 	logger.info("WS config change notif")
