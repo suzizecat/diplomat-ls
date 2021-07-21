@@ -47,6 +47,11 @@ def add_arguments(parser : argparse.ArgumentParser):
 		help="Avoid catching errors to let them show up on logs"
 	)
 
+	# parser.add_argument(
+	# 	"--teros", action="store_true",
+	# 	help="Prepare setup for use with TerosHDL"
+	# )
+
 
 def main():
 	parser = argparse.ArgumentParser()

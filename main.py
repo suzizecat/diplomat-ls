@@ -16,6 +16,7 @@
 ############################################################################
 import typing as T
 import os
+
 from typing import Optional, Any
 import functools
 import threading
@@ -73,7 +74,7 @@ class DiplomatLanguageServer(LanguageServer):
 		self.syntaxchecker = VeribleSyntaxChecker()
 		self.progress_uuid = None
 		self.debug = False
-		self.check_syntax = True
+		self.check_syntax = False
 
 	@property
 	def have_syntax_error(self):
@@ -92,11 +93,17 @@ class DiplomatLanguageServer(LanguageServer):
 
 diplomat_server = DiplomatLanguageServer()
 
-# @diplomat_server.feature(INITIALIZED)
-# def on_initialized(ls : DiplomatLanguageServer,params : InitializedParams) :
-# 	get_client_config(ls)
-# 	ls.show_message_log("Diplomat server is initialized.")
-# 	return None
+
+@diplomat_server.feature(INITIALIZED)
+def on_initialized(ls : DiplomatLanguageServer,params : InitializedParams) :
+	config = ls.get_configuration_async(ConfigurationParams(items=[
+		ConfigurationItem(
+			scope_uri='',
+			section=DiplomatLanguageServer.CONFIGURATION_SECTION)
+	])).result(2)[0]
+	process_configuration(ls,config)
+	ls.show_message_log("Diplomat server is initialized.")
+	return None
 
 
 @diplomat_server.thread()
@@ -108,6 +115,7 @@ def declaration(ls : DiplomatLanguageServer,params : DeclarationParams) -> Locat
 	ref_range = Range(start=params.position,
 					  end=params.position)
 	ret = ls.svindexer.get_definition_from_location(Location(uri=uri_source, range=ref_range))
+	logger.debug(f"Declaration found is {ret}")
 	return ret
 
 
@@ -121,6 +129,7 @@ def references(ls : DiplomatLanguageServer ,params : ReferenceParams) -> T.List[
 	ref_range = Range(start=params.position,
 					  end=params.position)
 	ret = ls.svindexer.get_refs_from_location(Location(uri=uri_source,range=ref_range))
+	logger.debug(f"References found is {ret}")
 	return ret
 
 
@@ -161,22 +170,23 @@ def get_client_config(ls: DiplomatLanguageServer, *args):
 	])).result(2)[0]
 	logger.debug("Got configuration back")
 	ls.show_message_log("Got client configuration.")
+	process_configuration(ls, config)
+
+
+def process_configuration(ls, config):
 	verible_root = config["backend"]["veribleInstallPath"]
-	verible_root += "/" if verible_root != "" and verible_root[-1] not in ["\\","/"] else ""
+	verible_root += "/" if verible_root != "" and verible_root[-1] not in ["\\", "/"] else ""
 	ls.svindexer.exec_root = verible_root
 	ls.syntaxchecker.executable = f"{verible_root}verible-verilog-syntax"
 	ls.index_path = config["indexFilePath"]
-
 	ls.flist_path = config["fileListPath"]
-	if not os.path.isabs(ls.flist_path) :
-		ls.flist_path = os.path.normpath(os.path.join(ls.workspace.root_path,ls.flist_path))
-
+	if not os.path.isabs(ls.flist_path):
+		ls.flist_path = os.path.normpath(os.path.join(ls.workspace.root_path, ls.flist_path))
 	ls.svindexer.workspace_root = os.path.dirname(os.path.abspath(ls.flist_path))
 	ls.skip_index = config["usePrebuiltIndex"]
-
-	if not os.path.isabs(ls.flist_path) :
-		ls.flist_path =  os.path.abspath(os.path.normpath(os.path.join(ls.workspace.root_path,ls.flist_path)))
-
+	logger.info(f"Use prebuilt index : {'True' if ls.skip_index else 'False'}")
+	if not os.path.isabs(ls.flist_path):
+		ls.flist_path = os.path.abspath(os.path.normpath(os.path.join(ls.workspace.root_path, ls.flist_path)))
 	ls.show_message_log(f"   FList path : {ls.flist_path}")
 	ls.show_message_log(f"   WS root path : {ls.svindexer.workspace_root}")
 	logger.info(f"FList path : {ls.flist_path}")

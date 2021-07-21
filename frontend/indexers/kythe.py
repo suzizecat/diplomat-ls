@@ -116,7 +116,7 @@ class KytheTree:
 		self.files : T.Dict[str,T.Optional[int]] = dict()
 		self.unsolved_edges : T.List[KytheEdge] = list()
 
-		self.db = sqlite3.connect(sql_db)
+		self.db = sqlite3.connect(sql_db, check_same_thread=False)
 		self.db.row_factory = sqlite3.Row
 
 		self._sql_create_db()
@@ -208,7 +208,6 @@ class KytheTree:
 									   [node_id,fact,value]).lastrowid
 
 	def sql_add_element(self,data : T.Dict[str,T.Union[T.Dict[str,str],str]]):
-		print("Add SQL element")
 		if data["fact_name"] == "/":
 			#  We have an edge
 			edge = KytheEdge.from_dict(data)

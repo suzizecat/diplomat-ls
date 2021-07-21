@@ -8,6 +8,7 @@ from subprocess import Popen, PIPE
 import tempfile
 import gc
 import time
+import toml
 
 import os
 import logging
@@ -30,12 +31,22 @@ class VeribleIndexer(KytheIndexer) :
 
 	def dump_file_list(self, path):
 		with open(path,"w") as file_handler :
+			logger.debug(self.filelist)
 			file_handler.write("\n".join(self.filelist))
 
 	def read_file_list(self,path):
-		with open(path,"r",newline="") as flist :
-			for f in flist :
-				self.filelist.append(f)
+		if os.path.splitext(path)[1] == ".toml" :
+			logger.info(f"Reading TOML file {path}")
+			toml_content = toml.load(path)
+			flist = toml_content["libraries"]["lib"]["files"]
+			valid_extension = [".sv",".v",".svh"]
+			new_files = [path for path in flist if os.path.splitext(path)[1].lower() in valid_extension]
+			logger.debug(f"Got files {' '.join(new_files)}")
+			self.filelist.extend(new_files)
+		else :
+			with open(path,"r",newline="") as flist :
+				for f in flist :
+					self.filelist.append(f)
 
 	def sort_files(self):
 		# vu = VUnit.from_argv()
@@ -68,7 +79,8 @@ class VeribleIndexer(KytheIndexer) :
 
 			command = [self.exec_root+self.command_path,
 							 "--file_list_root",
-							 self.workspace_root,
+							 "/",
+							 #self.workspace_root,
 							 "--print_kythe_facts",
 							 "json",
 					        "--include_dir_paths",
