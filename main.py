@@ -21,6 +21,7 @@ from typing import Optional, Any
 import functools
 import threading
 import logging
+from backend.sql_index_manager import SQLAnchor, SQLSymbol
 from pygls.lsp.methods import (COMPLETION, TEXT_DOCUMENT_DID_CHANGE, TEXT_DOCUMENT_DID_OPEN,
 							   TEXT_DOCUMENT_DID_CLOSE, TEXT_DOCUMENT_DID_SAVE,REFERENCES,DEFINITION,
 							   WORKSPACE_DID_CHANGE_CONFIGURATION, WINDOW_WORK_DONE_PROGRESS_CREATE, INITIALIZED)
@@ -30,7 +31,7 @@ from pygls.lsp.types import (CompletionItem, CompletionList, CompletionOptions,
 							 ConfigurationParams, Diagnostic, ReferenceParams,
 							 DidChangeTextDocumentParams,
 							 DidCloseTextDocumentParams,
-							 Range, Location, DeclarationParams,
+							 Range, Location, DeclarationParams, Position,
 							 DidSaveTextDocumentParams, InitializedParams)
 
 
@@ -60,6 +61,7 @@ class DiplomatLanguageServer(LanguageServer):
 	CMD_REINDEX = 'diplomat-server.full-index'
 	CMD_TST_PROGRESS_STRT = 'diplomat-server.test.start-progress'
 	CMD_TST_PROGRESS_STOP = 'diplomat-server.test.stop-progress'
+	CMD_DBG_DUMP_INDEX_DB = 'diplomat-server.dbg.dump-index'
 
 	CONFIGURATION_SECTION = 'diplomatServer'
 
@@ -70,7 +72,7 @@ class DiplomatLanguageServer(LanguageServer):
 		self.skip_index = False
 		self.indexed = False
 		self.configured = False
-		self.svindexer = VeribleIndexer()
+		self.svindexer = VeribleIndexer(None)
 		self.syntaxchecker = VeribleSyntaxChecker()
 		self.progress_uuid = None
 		self.debug = False
@@ -90,31 +92,59 @@ class DiplomatLanguageServer(LanguageServer):
 		for file,diaglist in self.syntaxchecker.diagnostic_content.items() :
 			self.publish_diagnostics(file,diaglist)
 
+	def anchor_to_location(self,anchor : SQLAnchor) -> Location:
+		logger.debug(f"Requesting anchor location")
+		file_path = self.svindexer.index.get_file_by_id(anchor.file).path
+		target_doc = self.workspace.get_document(uris.from_fs_path(file_path))
+		begin_line = target_doc.source[:anchor.start].count("\n")
+		begin_char = anchor.start - target_doc.source[:anchor.start].rfind("\n")
+
+		end_line = target_doc.source[:anchor.end].count("\n")
+		end_char = anchor.end - target_doc.source[:anchor.end].rfind("\n")
+		logger.debug(f"    Get location for anchor targeting file {file_path}")
+		return Location( uri=uris.from_fs_path(file_path),
+						 range=Range(
+			start=Position(line=begin_line, character=begin_char -1),
+			end=Position(line=end_line,character=end_char - 1)))
+
+	def get_symbol_from_location(self, selected_loc : Location) -> SQLSymbol:
+		wsdoc = self.workspace.get_document(selected_loc.uri)
+		db_file = self.svindexer.index.get_file_by_path(uris.to_fs_path(selected_loc.uri))
+		logger.debug(f"Looked up DB file for path {uris.to_fs_path(selected_loc.uri)}. Result : {db_file}")
+		curr_pos = wsdoc.offset_at_position(selected_loc.range.start)
+		logger.debug(f"Looked offset. Result : {curr_pos}")
+		db_anchor = self.svindexer.index.get_anchor_by_position(db_file.id,curr_pos)
+		db_anchor = min(db_anchor,key=lambda x : len(x))
+		logger.debug(f"Looked anchor. Result : {db_anchor} {db_anchor.id if db_anchor is not None else 'N/A'}")
+		if db_anchor is not None :
+			symbol = self.svindexer.index.get_definition_by_anchor(db_anchor)
+			logger.debug(f"Looked symbol. Result : {symbol} {symbol.id if symbol is not None else 'N/A'}")
+			return symbol
+		else:
+			return None
+
 
 diplomat_server = DiplomatLanguageServer()
 
 
 @diplomat_server.feature(INITIALIZED)
 def on_initialized(ls : DiplomatLanguageServer,params : InitializedParams) :
-	config = ls.get_configuration_async(ConfigurationParams(items=[
-		ConfigurationItem(
-			scope_uri='',
-			section=DiplomatLanguageServer.CONFIGURATION_SECTION)
-	])).result(2)[0]
-	process_configuration(ls,config)
 	ls.show_message_log("Diplomat server is initialized.")
 	return None
 
 
 @diplomat_server.thread()
 @diplomat_server.feature(DEFINITION)
-def declaration(ls : DiplomatLanguageServer,params : DeclarationParams) -> Location :
+def definition(ls : DiplomatLanguageServer, params : DeclarationParams) -> Location :
 	if not ls.indexed :
 		reindex_all(ls)
-	uri_source = unquote(params.text_document.uri)
-	ref_range = Range(start=params.position,
-					  end=params.position)
-	ret = ls.svindexer.get_definition_from_location(Location(uri=uri_source, range=ref_range))
+	logger.debug("Lookup definition")
+	selected_loc = Location(uri=params.text_document.uri,range=Range(start=params.position, end= params.position))
+	symbol = ls.get_symbol_from_location(selected_loc)
+	logger.debug(f"Requested definition for symbol {symbol.name}")
+	anchor = symbol.declaration_anchor
+	logger.debug(f"Anchor is {anchor.id}")
+	ret = ls.anchor_to_location(anchor)
 	logger.debug(f"Declaration found is {ret}")
 	return ret
 
@@ -125,10 +155,12 @@ def references(ls : DiplomatLanguageServer ,params : ReferenceParams) -> T.List[
 	"""Returns completion items."""
 	if not ls.indexed :
 		reindex_all(ls)
-	uri_source = unquote(params.text_document.uri)
-	ref_range = Range(start=params.position,
-					  end=params.position)
-	ret = ls.svindexer.get_refs_from_location(Location(uri=uri_source,range=ref_range))
+
+	selected_loc = Location(uri=params.text_document.uri, range=Range(start=params.position, end=params.position))
+	symbol = ls.get_symbol_from_location(selected_loc)
+	logger.debug(f"Requested references for symbol {symbol.name}")
+	refs  : T.List[SQLAnchor] = ls.svindexer.index.get_symbol_references(symbol)
+	ret = [ls.anchor_to_location(r) for r in refs]
 	logger.debug(f"References found is {ret}")
 	return ret
 
@@ -155,7 +187,13 @@ def did_open(ls : DiplomatLanguageServer, params : DidOpenTextDocumentParams):
 	if ls.configured :
 		ls.syntax_check(params.text_document.uri)
 
-
+@diplomat_server.thread()
+@diplomat_server.command(DiplomatLanguageServer.CMD_DBG_DUMP_INDEX_DB)
+def dump_index(ls: DiplomatLanguageServer, *args):
+	logger.info(f"Dump SQL index database into {os.path.abspath('index_dump.db')}")
+	ls.svindexer.index.dump_db("index_dump.db")
+	ls.svindexer.read_file_list(ls.flist_path)
+	ls.svindexer.dump_json_index("index_dump.json")
 
 @diplomat_server.thread()
 @diplomat_server.command(DiplomatLanguageServer.CMD_GET_CONFIGURATION)
@@ -174,6 +212,7 @@ def get_client_config(ls: DiplomatLanguageServer, *args):
 
 
 def process_configuration(ls, config):
+	ls.svindexer.workspace_root = ls.workspace.root_path
 	verible_root = config["backend"]["veribleInstallPath"]
 	verible_root += "/" if verible_root != "" and verible_root[-1] not in ["\\", "/"] else ""
 	ls.svindexer.exec_root = verible_root
@@ -280,22 +319,3 @@ def reorder(ls : DiplomatLanguageServer, *args):
 def on_workspace_did_change_configuration(ls : DiplomatLanguageServer, *args) :
 	logger.info("WS config change notif")
 	get_client_config(ls)
-
-
-# @diplomat_server.command(DiplomatLanguageServer.CMD_REGISTER_COMPLETIONS)
-# async def register_completions(ls: DiplomatLanguageServer, *args):
-# 	"""Register completions method on the client."""
-#
-# 	params = RegistrationParams(registrations=[
-# 		Registration(
-# 			id=str(uuid.uuid4()),
-# 			method=COMPLETION,
-# 			register_options={"triggerCharacters": "[':']"})
-# 	])
-# 	print("register")
-# 	response = await ls.register_capability_async(params)
-# 	if response is None:
-# 		ls.show_message('Successfully registered completions method')
-# 	else:
-# 		ls.show_message('Error happened during completions registration.',
-# 						MessageType.Error)

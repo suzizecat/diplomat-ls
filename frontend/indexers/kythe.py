@@ -124,6 +124,12 @@ class KytheTree:
 	def __del__(self):
 		self.db.close()
 
+	def dump_index_db(self, path):
+		bckp = sqlite3.connect(path)
+		with bckp :
+			self.db.backup(bckp)
+		bckp.close()
+
 	def _sql_create_db(self):
 		with open(f"{self.SQL_ROOT_PATH}/create_db.sql", "r") as f:
 			with self.db :

@@ -69,6 +69,9 @@ class KytheIndexer(GenericIndexerInterface):
 		self.files : T.Dict[str,KytheNode] = dict()
 		self.workspace_root : str = "."
 
+	def dump_index_db(self, path):
+		self.tree.dump_index_db(path)
+
 	def clear(self):
 		self.tree.clear()
 		self.anchors.clear()
@@ -78,7 +81,6 @@ class KytheIndexer(GenericIndexerInterface):
 		raise NotImplementedError
 
 	def refresh_files(self):
-
 		self.files.clear()
 		self.files = {n.path:n for n in self.tree.nodes.values() if n.kind == "file"}
 
