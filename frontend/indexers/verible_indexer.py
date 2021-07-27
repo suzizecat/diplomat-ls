@@ -2,8 +2,6 @@ import base64
 import json
 import typing as T
 
-from frontend.indexers import IndexItems,KytheIndexer
-from frontend.indexers import KytheRef
 from subprocess import Popen, PIPE
 import tempfile
 import gc
