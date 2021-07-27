@@ -24,7 +24,7 @@ import logging
 from backend.sql_index_manager import SQLAnchor, SQLSymbol
 from pygls.lsp.methods import (COMPLETION, TEXT_DOCUMENT_DID_CHANGE, TEXT_DOCUMENT_DID_OPEN,
 							   TEXT_DOCUMENT_DID_CLOSE, TEXT_DOCUMENT_DID_SAVE,REFERENCES,DEFINITION,
-							   WORKSPACE_DID_CHANGE_CONFIGURATION, WINDOW_WORK_DONE_PROGRESS_CREATE, INITIALIZED)
+							   WORKSPACE_DID_CHANGE_CONFIGURATION, WINDOW_WORK_DONE_PROGRESS_CREATE, INITIALIZED, PREPARE_RENAME, RENAME)
 
 from pygls.lsp.types import (CompletionItem, CompletionList, CompletionOptions,
 							 CompletionParams, ConfigurationItem, DidOpenTextDocumentParams,
@@ -32,7 +32,8 @@ from pygls.lsp.types import (CompletionItem, CompletionList, CompletionOptions,
 							 DidChangeTextDocumentParams,
 							 DidCloseTextDocumentParams,
 							 Range, Location, DeclarationParams, Position,
-							 DidSaveTextDocumentParams, InitializedParams)
+							 DidSaveTextDocumentParams, InitializedParams, PrepareRenameParams, RenameParams,
+							 TextDocumentEdit, OptionalVersionedTextDocumentIdentifier, TextEdit, WorkspaceEdit)
 
 
 from pygls.lsp.types import  Model
@@ -110,15 +111,13 @@ class DiplomatLanguageServer(LanguageServer):
 	def get_symbol_from_location(self, selected_loc : Location) -> SQLSymbol:
 		wsdoc = self.workspace.get_document(selected_loc.uri)
 		db_file = self.svindexer.index.get_file_by_path(uris.to_fs_path(selected_loc.uri))
-		logger.debug(f"Looked up DB file for path {uris.to_fs_path(selected_loc.uri)}. Result : {db_file}")
 		curr_pos = wsdoc.offset_at_position(selected_loc.range.start)
-		logger.debug(f"Looked offset. Result : {curr_pos}")
-		db_anchor = self.svindexer.index.get_anchor_by_position(db_file.id,curr_pos)
-		db_anchor = min(db_anchor,key=lambda x : len(x))
-		logger.debug(f"Looked anchor. Result : {db_anchor} {db_anchor.id if db_anchor is not None else 'N/A'}")
-		if db_anchor is not None :
-			symbol = self.svindexer.index.get_definition_by_anchor(db_anchor)
-			logger.debug(f"Looked symbol. Result : {symbol} {symbol.id if symbol is not None else 'N/A'}")
+		achors_by_pos = self.svindexer.index.get_anchor_by_position(db_file.id,curr_pos)
+		if len(achors_by_pos) == 0 :
+			return None
+		selected_anchor = min(achors_by_pos,key=lambda x : len(x))
+		if selected_anchor is not None :
+			symbol = self.svindexer.index.get_definition_by_anchor(selected_anchor)
 			return symbol
 		else:
 			return None
@@ -134,6 +133,52 @@ def on_initialized(ls : DiplomatLanguageServer,params : InitializedParams) :
 
 
 @diplomat_server.thread()
+@diplomat_server.feature(PREPARE_RENAME)
+def prepare_rename(ls : DiplomatLanguageServer, params : PrepareRenameParams) -> Range:
+	if not ls.indexed :
+		reindex_all(ls)
+	selected_loc = Location(uri=params.text_document.uri,range=Range(start=params.position, end= params.position))
+	symbol = ls.get_symbol_from_location(selected_loc)
+	if symbol is None :
+		return None
+	else:
+		return ls.anchor_to_location(symbol.declaration_anchor).range
+
+@diplomat_server.thread()
+@diplomat_server.feature(RENAME)
+def perform_rename(ls : DiplomatLanguageServer, params : RenameParams) -> WorkspaceEdit:
+	"""
+	Search for all symbol references, generate a text edit for each and send them.
+	:param ls:
+	:param params:
+	:return:
+	"""
+	new_name = params.new_name
+	selected_loc = Location(uri=params.text_document.uri, range=Range(start=params.position, end=params.position))
+	symbol = ls.get_symbol_from_location(selected_loc)
+
+	anchor_list = [symbol.declaration_anchor]
+	anchor_list.extend(ls.svindexer.index.get_symbol_references(symbol))
+
+	locations_list : T.List[Location] = [ls.anchor_to_location(a) for a in anchor_list]
+
+	files_list = {l.uri for l in locations_list}
+	edits = dict()
+	for f_uri in files_list :
+	#		if f_uri not in ls.workspace.documents :
+	#			ls.workspace.put_document()
+		edits[f_uri] = [TextEdit(range=x.range,new_text=new_name) for x in locations_list if x.uri == f_uri]
+	#		edits.append(TextDocumentEdit(textDocument=OptionalVersionedTextDocumentIdentifier(uri=f_uri),
+	#								  edits = [TextEdit(range=x.range,new_text=new_name) for x in locations_list if x.uri == f_uri]))
+
+	ret = WorkspaceEdit(changes=edits)
+
+	logger.debug(f"Reply for edit : {ret}")
+	return ret
+
+
+
+@diplomat_server.thread()
 @diplomat_server.feature(DEFINITION)
 def definition(ls : DiplomatLanguageServer, params : DeclarationParams) -> Location :
 	if not ls.indexed :
@@ -141,6 +186,10 @@ def definition(ls : DiplomatLanguageServer, params : DeclarationParams) -> Locat
 	logger.debug("Lookup definition")
 	selected_loc = Location(uri=params.text_document.uri,range=Range(start=params.position, end= params.position))
 	symbol = ls.get_symbol_from_location(selected_loc)
+	if symbol is None :
+		logger.info("Symbol not found")
+		return None
+
 	logger.debug(f"Requested definition for symbol {symbol.name}")
 	anchor = symbol.declaration_anchor
 	logger.debug(f"Anchor is {anchor.id}")
@@ -158,6 +207,9 @@ def references(ls : DiplomatLanguageServer ,params : ReferenceParams) -> T.List[
 
 	selected_loc = Location(uri=params.text_document.uri, range=Range(start=params.position, end=params.position))
 	symbol = ls.get_symbol_from_location(selected_loc)
+	if symbol is None :
+		logger.info("Symbol not found")
+		return None
 	logger.debug(f"Requested references for symbol {symbol.name}")
 	refs  : T.List[SQLAnchor] = ls.svindexer.index.get_symbol_references(symbol)
 	ret = [ls.anchor_to_location(r) for r in refs]
