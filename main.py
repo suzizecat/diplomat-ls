@@ -94,28 +94,28 @@ class DiplomatLanguageServer(LanguageServer):
 			self.publish_diagnostics(file,diaglist)
 
 	def anchor_to_location(self,anchor : SQLAnchor) -> Location:
-		logger.debug(f"Requesting anchor location")
 		file_path = self.svindexer.index.get_file_by_id(anchor.file).path
-		target_doc = self.workspace.get_document(uris.from_fs_path(file_path))
-		begin_line = target_doc.source[:anchor.start].count("\n")
-		begin_char = anchor.start - target_doc.source[:anchor.start].rfind("\n")
 
-		end_line = target_doc.source[:anchor.end].count("\n")
-		end_char = anchor.end - target_doc.source[:anchor.end].rfind("\n")
-		logger.debug(f"    Get location for anchor targeting file {file_path}")
+		begin_line = anchor.start_line
+		begin_char = anchor.start_char
+		end_line = anchor.end_line
+		end_char = anchor.end_char
+
 		return Location( uri=uris.from_fs_path(file_path),
 						 range=Range(
 			start=Position(line=begin_line, character=begin_char -1),
 			end=Position(line=end_line,character=end_char - 1)))
 
 	def get_symbol_from_location(self, selected_loc : Location) -> SQLSymbol:
-		wsdoc = self.workspace.get_document(selected_loc.uri)
+		logger.debug(f"Query symbol for location {selected_loc}")
+		#wsdoc = self.workspace.get_document(selected_loc.uri)
 		db_file = self.svindexer.index.get_file_by_path(uris.to_fs_path(selected_loc.uri))
-		curr_pos = wsdoc.offset_at_position(selected_loc.range.start)
-		achors_by_pos = self.svindexer.index.get_anchor_by_position(db_file.id,curr_pos)
-		if len(achors_by_pos) == 0 :
+
+		anchors_by_pos : T.List[SQLAnchor] = self.svindexer.index.get_anchor_by_position(db_file.id,selected_loc.range.start.line,selected_loc.range.start.character)
+		logger.debug(f"    Anchor found {anchors_by_pos}")
+		if len(anchors_by_pos) == 0 :
 			return None
-		selected_anchor = min(achors_by_pos,key=lambda x : len(x))
+		selected_anchor = min(anchors_by_pos,key=lambda x : len(x))
 		if selected_anchor is not None :
 			symbol = self.svindexer.index.get_definition_by_anchor(selected_anchor)
 			return symbol
@@ -154,24 +154,40 @@ def perform_rename(ls : DiplomatLanguageServer, params : RenameParams) -> Worksp
 	:return:
 	"""
 	new_name = params.new_name
+	if not new_name.isidentifier() :
+		# If invalid identifier, we don't want to perform rename.
+		return None
+
 	selected_loc = Location(uri=params.text_document.uri, range=Range(start=params.position, end=params.position))
 	symbol = ls.get_symbol_from_location(selected_loc)
+
+	delta_name_len = len(new_name) - len(symbol.name)
 
 	anchor_list = [symbol.declaration_anchor]
 	anchor_list.extend(ls.svindexer.index.get_symbol_references(symbol))
 
+	# Client-side preparation
 	locations_list : T.List[Location] = [ls.anchor_to_location(a) for a in anchor_list]
-
 	files_list = {l.uri for l in locations_list}
+
 	edits = dict()
 	for f_uri in files_list :
-	#		if f_uri not in ls.workspace.documents :
-	#			ls.workspace.put_document()
 		edits[f_uri] = [TextEdit(range=x.range,new_text=new_name) for x in locations_list if x.uri == f_uri]
-	#		edits.append(TextDocumentEdit(textDocument=OptionalVersionedTextDocumentIdentifier(uri=f_uri),
-	#								  edits = [TextEdit(range=x.range,new_text=new_name) for x in locations_list if x.uri == f_uri]))
 
 	ret = WorkspaceEdit(changes=edits)
+
+	# Server-side, SQL db update
+	# This will change the anchor objects, all action taken on original anchor location shall be done before.
+	files_id = {x.file for x in anchor_list}
+	for fid in files_id :
+		per_file_anchor_list = {x.start_line : sorted([j for j in anchor_list if j.file == fid and j.start_line == x.start_line],key=lambda x : x.start_char) for x in anchor_list if x.file == fid}
+		alist : T.List[SQLAnchor]
+		for line, alist in per_file_anchor_list.items():
+			for i in range(len(alist)) :
+				alist[i].start_char += i * delta_name_len
+				alist[i].end_char += (i+1) * delta_name_len
+
+	ls.svindexer.index.bulk_update_anchors(anchor_list)
 
 	logger.debug(f"Reply for edit : {ret}")
 	return ret
@@ -183,25 +199,22 @@ def perform_rename(ls : DiplomatLanguageServer, params : RenameParams) -> Worksp
 def definition(ls : DiplomatLanguageServer, params : DeclarationParams) -> Location :
 	if not ls.indexed :
 		reindex_all(ls)
-	logger.debug("Lookup definition")
+
 	selected_loc = Location(uri=params.text_document.uri,range=Range(start=params.position, end= params.position))
 	symbol = ls.get_symbol_from_location(selected_loc)
 	if symbol is None :
 		logger.info("Symbol not found")
 		return None
 
-	logger.debug(f"Requested definition for symbol {symbol.name}")
 	anchor = symbol.declaration_anchor
-	logger.debug(f"Anchor is {anchor.id}")
 	ret = ls.anchor_to_location(anchor)
-	logger.debug(f"Declaration found is {ret}")
 	return ret
 
 
 @diplomat_server.thread()
 @diplomat_server.feature(REFERENCES)
 def references(ls : DiplomatLanguageServer ,params : ReferenceParams) -> T.List[Location]:
-	"""Returns completion items."""
+	"""Returns references to the currently selected item."""
 	if not ls.indexed :
 		reindex_all(ls)
 

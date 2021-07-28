@@ -1,94 +1,16 @@
-import base64
+
 import sqlite3
 import os
 
 import typing as T
 from . import SQLAnchor, SQLSymbol, SQLFile
+from .SQLDataTypes import JSONRecord
 import gc
 import json
-import base64
+
 import logging
 
 logger = logging.getLogger("myLogger")
-
-class KytheVName:
-	def __init__(self, signature : str = None, path : str = None, lang : str = None, root : str = None, corpus :str = None):
-		self.signature = signature
-		self.path = path
-		self.lang = lang
-		self.root = root
-		self.corpus = corpus
-
-	@classmethod
-	def from_dict(cls,data):
-
-		return cls(data["signature"],data["path"],data["language"],data["root"], data["corpus"])
-
-class JSONRecord:
-	AUTO_DECODE = True
-	def __init__(self):
-		self.source : KytheVName = None
-		self.target : KytheVName = None
-		self.edge_kind : str = None
-		self.facts : T.Dict[str,str] = dict()
-
-	def is_record_appendable(self,data):
-		if self.source is not None and self.source.signature != KytheVName.from_dict(data["source"]).signature :
-			return False
-		if "fact_value" in data and data["fact_name"] in self.facts :
-			return False
-		return True
-
-	def append_record(self,data):
-
-		if self.source is None :
-			self.source = KytheVName.from_dict(data["source"])
-		if "target" in data :
-			self.target = KytheVName.from_dict(data["target"])
-		if "edge_kind" in data :
-
-			self.edge_kind = data["edge_kind"][len("/kythe/edge"):]
-
-		if "fact_value" in data :
-			self.facts[data["fact_name"]] = data["fact_value"] if not self.AUTO_DECODE else base64.standard_b64decode(data["fact_value"]).decode("utf-8")
-		return True
-
-	def clear(self):
-		self.source = None
-		self.target = None
-		self.edge_kind = None
-		self.facts.clear()
-
-	@property
-	def is_node(self):
-		return "/kythe/node/kind" in self.facts and self.source.signature != ""
-
-	@property
-	def is_anchor(self):
-		return self.is_node and self.facts["/kythe/node/kind"] == "anchor"
-
-	@property
-	def is_symbol(self):
-		return self.is_node and not self.is_anchor
-
-	@property
-	def symbol_type(self):
-		if not self.is_symbol :
-			return None
-		if "/kythe/subkind" in self.facts :
-			return self.facts["/kythe/subkind"]
-		else:
-			return self.facts["/kythe/node/kind"]
-
-	@property
-	def	is_file(self):
-		if "/kythe/node/kind" in self.facts and self.facts["/kythe/node/kind"] == "file" :
-			return True
-		return False
-
-	@property
-	def is_edge(self):
-		return self.target is not None
 
 
 
@@ -149,9 +71,9 @@ class SQLIndexManager:
 			return self.db.execute("INSERT INTO files(path,content) VALUES (?,?)",[file_path,content]).lastrowid
 
 
-	def add_anchor(self,file_id : int,start : int, end : int) -> int:
+	def add_anchor(self,anchor : SQLAnchor) -> int:
 		"""
-		Low-level creation of an anchor object in db.
+		High level creation of an anchor object in db.
 		Return the row id upon success.
 		:param file_id: File identifier for the anchor
 		:param start: Start position, in absolute character from the beginning of the file.
@@ -159,7 +81,18 @@ class SQLIndexManager:
 		:return: ID column of the created anchor.
 		"""
 		with self.db :
-			return self.db.execute("INSERT INTO anchors(file,start,stop) VALUES (?,?,?)",[file_id,start,end]).lastrowid
+			return self.db.execute("INSERT INTO anchors VALUES (NULL,?,?,?,?,?)",anchor.db_record[1:]).lastrowid
+
+	def bulk_update_anchors(self,data : T.List[SQLAnchor]):
+		"""
+		This function will update all SQLRow specified by an anchor in data.
+		The reference is the ID and all data will be updated to match the anchor object.
+		:param data: List of SQLAnchor object
+		:return: None
+		"""
+		dataset = [x.db_record[1:] + [x.db_record[0]] for x in data]
+		with self.db :
+			self.db.executemany("UPDATE anchors SET (file,start_line,start_char,stop_line,stop_char) = (?,?,?,?,?) WHERE id = ?",dataset)
 
 	def add_symbol(self,name : str, type : str, declaration_anchor_id : int) -> int:
 		"""
@@ -222,12 +155,11 @@ class SQLIndexManager:
 
 		with self.db :
 			results = self.db.execute("SELECT anchors.*, refs.id as rid, anchor FROM refs INNER JOIN anchors ON anchors.id == refs.anchor WHERE refs.symbol == ?", [symbol.id]).fetchall()
-			results_items = [SQLAnchor(x["id"],x["file"],x["start"], x["stop"]) for x in results]
-			logger.debug(f"Found references : {results_items}")
+			results_items = [SQLAnchor(x["id"],x["file"],(x["start_line"],x["start_char"]), (x["stop_line"],x["stop_char"])) for x in results]
 
 		return results_items
 
-	def get_anchor_by_position(self, file : int, position : int) -> T.List[SQLAnchor]:
+	def get_anchor_by_position(self, file : int, line : int, char : int) -> T.List[SQLAnchor]:
 		"""
 		Retrieve the anchor at the given position.
 		:param file: File to look into
@@ -235,22 +167,26 @@ class SQLIndexManager:
 		:return: Anchors if any, None otherwise
 		"""
 		ret = list()
+		logger.debug(f"  Anchor by position target : {[file,line,line,char,char]}")
 		with self.db :
 			result = self.db.execute("SELECT * FROM anchors "
 									 "WHERE "
 									 "	file == ? "
-									 "	AND start <= ? "
-									 "	AND stop >= ?",
-									 [file,position,position]).fetchall()
+									 "	AND start_line <= ? "
+									 "	AND stop_line >= ? "
+									 "  AND start_char <= ? "
+									 "  AND stop_char >= ? ",
+									 [file,line,line,char,char]).fetchall()
 
-			ret = [SQLAnchor(x["id"],x["file"],x["start"],x["stop"]) for x in result]
+			ret = [SQLAnchor.from_sql_record(x) for x in result]
+			logger.debug(f"    Query results : {ret}")
 		return ret
 
 	def get_anchor_by_id(self, aid : int) -> T.Optional[SQLAnchor]:
 		with self.db:
 			r = self.db.execute("SELECT * FROM anchors WHERE id = ?",[aid]).fetchone()
 			if r is not None :
-				return SQLAnchor(r["id"], r["file"], r["start"], r["stop"])
+				return SQLAnchor.from_sql_record(r)
 		return None
 
 	def get_symbol_by_id(self, sid : int) -> T.Optional[SQLSymbol]:
@@ -324,8 +260,10 @@ class SQLIndexManager:
 	def _process_kythe_node(self, node_content : JSONRecord):
 		if node_content.is_file :
 			self._file_id_mapping[node_content.source.path] = self.add_file(node_content.source.path,node_content.facts["/kythe/text"])
+			return
 		if node_content.is_anchor :
-			self._signature_cache[node_content.source.signature] = self.add_anchor(self._file_id_mapping[node_content.source.path],int(node_content.facts["/kythe/loc/start"]),int(node_content.facts["/kythe/loc/end"]))
+			self._cache_file_id(self._file_id_mapping[node_content.source.path])
+			self._signature_cache[node_content.source.signature] = self.add_anchor(SQLAnchor.from_json_record(node_content,self._cached_file))
 			return
 		if node_content.is_symbol :
 			self._signature_cache[node_content.source.signature] = self.add_symbol(node_content.source.signature,node_content.symbol_type,None)
@@ -333,13 +271,16 @@ class SQLIndexManager:
 		if node_content.is_edge :
 			if node_content.edge_kind in ["/defines/binding"]:
 				anchor_signature = node_content.source.signature
+
 				anchor = self.get_anchor_by_id(self._signature_cache[anchor_signature])
 				symbol_id = self._signature_cache[node_content.target.signature]
 
 				self._cache_file_id(anchor.file)
 
 				self._update_symbol_anchor(symbol_id,anchor.id)
-				self.update_symbol_name(symbol_id,self._cached_file.content[anchor.start:anchor.end])
+				start_offset = self._cached_file.offset_from_position(anchor.start_line, anchor.start_char)
+				end_offset = self._cached_file.offset_from_position(anchor.end_line, anchor.end_char)
+				self.update_symbol_name(symbol_id,self._cached_file.content[start_offset:end_offset])
 
 			if node_content.edge_kind in ["/ref"]:
 				self.add_ref(self._signature_cache[node_content.source.signature], self._signature_cache[node_content.target.signature])
