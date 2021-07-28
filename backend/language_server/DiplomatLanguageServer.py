@@ -52,6 +52,7 @@ class DiplomatLanguageServer(LanguageServer):
 		if base64_encoded :
 			config_string = base64.standard_b64decode(config)
 		self.config = json.loads(config_string)
+		self.config["usePrebuiltIndex"] = True if self.config["usePrebuiltIndex"].lower() == "true" else False
 
 	def process_configuration(self, config):
 		self.svindexer.workspace_root = self.workspace.root_path

@@ -47,6 +47,12 @@ def add_arguments(parser : argparse.ArgumentParser):
 		help="Avoid catching errors to let them show up on logs"
 	)
 
+	parser.add_argument(
+		"--static-config", type=str, default=None,
+		help="Provide a static configuration. "
+			 "It is a JSON string, base64-encoded, matching the VSCode client options setup"
+	)
+
 	# parser.add_argument(
 	# 	"--teros", action="store_true",
 	# 	help="Prepare setup for use with TerosHDL"
@@ -67,6 +73,9 @@ def main():
 		logging.root.setLevel(level)
 
 	diplomat_server.debug = args.debug
+	if args.static_config is not None :
+		diplomat_server.set_static_configuration(args.static_config,base64_encoded=True)
+
 	if args.tcp :
 		logger.addHandler(stream_handler)
 		logger.info(f"Start server on TCP port {args.port}")
