@@ -14,37 +14,21 @@
 # See the License for the specific language governing permissions and      #
 # limitations under the License.                                           #
 ############################################################################
-import typing as T
-import os
-
-from typing import Optional, Any
-import functools
-import threading
 import logging
-from backend.sql_index_manager import SQLAnchor, SQLSymbol
-from pygls.lsp.methods import (COMPLETION, TEXT_DOCUMENT_DID_CHANGE, TEXT_DOCUMENT_DID_OPEN,
-							   TEXT_DOCUMENT_DID_CLOSE, TEXT_DOCUMENT_DID_SAVE,REFERENCES,DEFINITION,
-							   WORKSPACE_DID_CHANGE_CONFIGURATION, WINDOW_WORK_DONE_PROGRESS_CREATE, INITIALIZED, PREPARE_RENAME, RENAME)
-
-from pygls.lsp.types import (CompletionItem, CompletionList, CompletionOptions,
-							 CompletionParams, ConfigurationItem, DidOpenTextDocumentParams,
-							 ConfigurationParams, Diagnostic, ReferenceParams,
-							 DidChangeTextDocumentParams,
+import os
+import typing as T
+from backend.language_server import DiplomatLanguageServer
+from pygls.lsp.methods import (TEXT_DOCUMENT_DID_OPEN,
+							   TEXT_DOCUMENT_DID_CLOSE, TEXT_DOCUMENT_DID_SAVE, REFERENCES, DEFINITION,
+							   WORKSPACE_DID_CHANGE_CONFIGURATION, INITIALIZED, PREPARE_RENAME, RENAME)
+from pygls.lsp.types import (DidOpenTextDocumentParams,
+							 ReferenceParams,
 							 DidCloseTextDocumentParams,
-							 Range, Location, DeclarationParams, Position,
-							 DidSaveTextDocumentParams, InitializedParams, PrepareRenameParams, RenameParams,
-							 TextDocumentEdit, OptionalVersionedTextDocumentIdentifier, TextEdit, WorkspaceEdit)
+							 Range, Location, DeclarationParams, DidSaveTextDocumentParams, InitializedParams,
+							 PrepareRenameParams, RenameParams,
+							 TextEdit, WorkspaceEdit)
 
-
-from pygls.lsp.types import  Model
-from pygls.server import LanguageServer
-
-from urllib.parse import unquote
-from pygls import uris
-
-
-from frontend import VeribleIndexer
-from frontend import VeribleSyntaxChecker
+from backend.sql_index_manager import SQLAnchor
 
 logger = logging.getLogger("myLogger")
 
@@ -55,80 +39,16 @@ logger = logging.getLogger("myLogger")
 # 	value: Any
 
 
-class DiplomatLanguageServer(LanguageServer):
-	CMD_INDEX_WORKSPACE = 'diplomat-server.reindex'
-	CMD_GET_CONFIGURATION = "diplomat-server.get-configuration"
-	CMD_REORDER = "diplomat-server.reorder-files"
-	CMD_REINDEX = 'diplomat-server.full-index'
-	CMD_TST_PROGRESS_STRT = 'diplomat-server.test.start-progress'
-	CMD_TST_PROGRESS_STOP = 'diplomat-server.test.stop-progress'
-	CMD_DBG_DUMP_INDEX_DB = 'diplomat-server.dbg.dump-index'
-
-	CONFIGURATION_SECTION = 'diplomatServer'
-
-	def __init__(self):
-		super().__init__()
-		self.index_path = ""
-		self.flist_path = ""
-		self.skip_index = False
-		self.indexed = False
-		self.configured = False
-		self.svindexer = VeribleIndexer(None)
-		self.syntaxchecker = VeribleSyntaxChecker()
-		self.progress_uuid = None
-		self.debug = False
-		self.check_syntax = False
-
-	@property
-	def have_syntax_error(self):
-		return self.syntaxchecker.nberrors > 0
-
-	def syntax_check(self,file : str):
-		if file is not None :
-			f = uris.to_fs_path(file)
-			self.syntaxchecker.run_incremental([f])
-		else :
-			self.syntaxchecker.run()
-
-		for file,diaglist in self.syntaxchecker.diagnostic_content.items() :
-			self.publish_diagnostics(file,diaglist)
-
-	def anchor_to_location(self,anchor : SQLAnchor) -> Location:
-		file_path = self.svindexer.index.get_file_by_id(anchor.file).path
-
-		begin_line = anchor.start_line
-		begin_char = anchor.start_char
-		end_line = anchor.end_line
-		end_char = anchor.end_char
-
-		return Location( uri=uris.from_fs_path(file_path),
-						 range=Range(
-			start=Position(line=begin_line, character=begin_char -1),
-			end=Position(line=end_line,character=end_char - 1)))
-
-	def get_symbol_from_location(self, selected_loc : Location) -> SQLSymbol:
-		logger.debug(f"Query symbol for location {selected_loc}")
-		#wsdoc = self.workspace.get_document(selected_loc.uri)
-		db_file = self.svindexer.index.get_file_by_path(uris.to_fs_path(selected_loc.uri))
-
-		anchors_by_pos : T.List[SQLAnchor] = self.svindexer.index.get_anchor_by_position(db_file.id,selected_loc.range.start.line,selected_loc.range.start.character)
-		logger.debug(f"    Anchor found {anchors_by_pos}")
-		if len(anchors_by_pos) == 0 :
-			return None
-		selected_anchor = min(anchors_by_pos,key=lambda x : len(x))
-		if selected_anchor is not None :
-			symbol = self.svindexer.index.get_definition_by_anchor(selected_anchor)
-			return symbol
-		else:
-			return None
-
-
 diplomat_server = DiplomatLanguageServer()
 
 
 @diplomat_server.feature(INITIALIZED)
 def on_initialized(ls : DiplomatLanguageServer,params : InitializedParams) :
 	ls.show_message_log("Diplomat server is initialized.")
+
+	if ls.config is not None :
+		ls.show_message_log("  Static configuration was provided.")
+		ls.disable_update_config()
 	return None
 
 
@@ -263,39 +183,9 @@ def dump_index(ls: DiplomatLanguageServer, *args):
 @diplomat_server.thread()
 @diplomat_server.command(DiplomatLanguageServer.CMD_GET_CONFIGURATION)
 def get_client_config(ls: DiplomatLanguageServer, *args):
-	logger.debug("Refresh configuration")
-	ls.show_message_log("Configuration requested")
+	config = ls.refresh_configuration()
+	ls.process_configuration(config)
 
-	config = ls.get_configuration(ConfigurationParams(items=[
-		ConfigurationItem(
-			scope_uri='',
-			section=DiplomatLanguageServer.CONFIGURATION_SECTION)
-	])).result(2)[0]
-	logger.debug("Got configuration back")
-	ls.show_message_log("Got client configuration.")
-	process_configuration(ls, config)
-
-
-def process_configuration(ls, config):
-	ls.svindexer.workspace_root = ls.workspace.root_path
-	verible_root = config["backend"]["veribleInstallPath"]
-	verible_root += "/" if verible_root != "" and verible_root[-1] not in ["\\", "/"] else ""
-	ls.svindexer.exec_root = verible_root
-	ls.syntaxchecker.executable = f"{verible_root}verible-verilog-syntax"
-	ls.index_path = config["indexFilePath"]
-	ls.flist_path = config["fileListPath"]
-	if not os.path.isabs(ls.flist_path):
-		ls.flist_path = os.path.normpath(os.path.join(ls.workspace.root_path, ls.flist_path))
-	ls.svindexer.workspace_root = os.path.dirname(os.path.abspath(ls.flist_path))
-	ls.skip_index = config["usePrebuiltIndex"]
-	logger.info(f"Use prebuilt index : {'True' if ls.skip_index else 'False'}")
-	if not os.path.isabs(ls.flist_path):
-		ls.flist_path = os.path.abspath(os.path.normpath(os.path.join(ls.workspace.root_path, ls.flist_path)))
-	ls.show_message_log(f"   FList path : {ls.flist_path}")
-	ls.show_message_log(f"   WS root path : {ls.svindexer.workspace_root}")
-	logger.info(f"FList path : {ls.flist_path}")
-	logger.info(f"WS root path : {ls.svindexer.workspace_root}")
-	ls.configured = True
 
 
 @diplomat_server.thread()
