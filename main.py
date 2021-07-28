@@ -193,7 +193,8 @@ def get_client_config(ls: DiplomatLanguageServer, *args):
 def reindex_all(ls : DiplomatLanguageServer, *args):
 	if not ls.configured :
 		ls.show_message("You need to update server configuration before indexing")
-		ls.show_message_log(f"Trying to reindex without configuration")
+		ls.show_message_log(f"Trying to update the configuration")
+		get_client_config(ls)
 	else :
 		ls.svindexer.clear()
 		if not ls.skip_index :
