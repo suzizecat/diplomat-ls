@@ -20,13 +20,15 @@ import typing as T
 from backend.language_server import DiplomatLanguageServer
 from pygls.lsp.methods import (TEXT_DOCUMENT_DID_OPEN,
 							   TEXT_DOCUMENT_DID_CLOSE, TEXT_DOCUMENT_DID_SAVE, REFERENCES, DEFINITION,
-							   WORKSPACE_DID_CHANGE_CONFIGURATION, INITIALIZED, PREPARE_RENAME, RENAME)
+							   WORKSPACE_DID_CHANGE_CONFIGURATION, INITIALIZED, PREPARE_RENAME, RENAME,
+							   COMPLETION)
 from pygls.lsp.types import (DidOpenTextDocumentParams,
 							 ReferenceParams,
 							 DidCloseTextDocumentParams,
 							 Range, Location, DeclarationParams, DidSaveTextDocumentParams, InitializedParams,
 							 PrepareRenameParams, RenameParams,
-							 TextEdit, WorkspaceEdit)
+							 TextEdit, WorkspaceEdit,
+							 CompletionList, CompletionParams, Position, CompletionItem)
 
 from backend.sql_index_manager import SQLAnchor
 
@@ -45,10 +47,13 @@ diplomat_server = DiplomatLanguageServer()
 @diplomat_server.feature(INITIALIZED)
 def on_initialized(ls : DiplomatLanguageServer,params : InitializedParams) :
 	ls.show_message_log("Diplomat server is initialized.")
-
+	ls.show_message_log(f"  Server CWD is : {os.path.abspath('.')}")
 	if ls.config is not None :
 		ls.show_message_log("  Static configuration was provided.")
 		ls.disable_update_config()
+	else :
+		ls.show_message_log("  Dynamic configuration in use")
+		#get_client_config(ls)
 	return None
 
 
@@ -178,7 +183,8 @@ def dump_index(ls: DiplomatLanguageServer, *args):
 	logger.info(f"Dump SQL index database into {os.path.abspath('index_dump.db')}")
 	ls.svindexer.index.dump_db("index_dump.db")
 	ls.svindexer.read_file_list(ls.flist_path)
-	ls.svindexer.dump_json_index("index_dump.json")
+	ls.svindexer.dump_json_index("index_dump_debug.json","json_debug")
+	ls.svindexer.dump_json_index("index_dump.json", "json")
 
 @diplomat_server.thread()
 @diplomat_server.command(DiplomatLanguageServer.CMD_GET_CONFIGURATION)
@@ -207,6 +213,19 @@ def reindex_all(ls : DiplomatLanguageServer, *args):
 
 		ls.indexed = True
 		ls.show_message("Indexing done")
+
+# As we don't have type resolution from Verible, that's useless.
+# @diplomat_server.thread()
+# @diplomat_server.feature(COMPLETION)
+# def provide_completion(ls : DiplomatLanguageServer, params : CompletionParams ) -> CompletionList :
+# 	ls.show_message_log("Require completion...")
+# 	document = ls.workspace.get_document(params.text_document.uri)
+# 	position = params.position
+#
+# 	complete_items = ls.get_completion(document, position)
+# 	logger.debug(f"Found completion items : {complete_items}")
+# 	return CompletionList(is_incomplete = False, items=[CompletionItem(label=x) for x in complete_items])
+
 
 @diplomat_server.thread()
 @diplomat_server.command(DiplomatLanguageServer.CMD_REORDER)

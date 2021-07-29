@@ -26,6 +26,8 @@ class JSONRecord:
 		self.facts : T.Dict[str,str] = dict()
 
 	def is_record_appendable(self,data):
+		if self.is_edge :
+			return False
 		if self.source is not None and self.source.signature != KytheVName.from_dict(data["source"]).signature :
 			return False
 		if "fact_value" in data and data["fact_name"] in self.facts :
@@ -39,7 +41,6 @@ class JSONRecord:
 		if "target" in data :
 			self.target = KytheVName.from_dict(data["target"])
 		if "edge_kind" in data :
-
 			self.edge_kind = data["edge_kind"][len("/kythe/edge"):]
 
 		if "fact_value" in data :
@@ -127,7 +128,7 @@ class SQLFile:
 			if line_start == -1 :
 				logger.warning(f"offset_from_position : offset not found for position {line}:{char} inf file {self.path}")
 				return -1
-		return line_start + char
+		return line_start + char - (1 if line_start == 0 else 0)
 
 
 class SQLAnchor:

@@ -32,6 +32,13 @@ CREATE TABLE IF NOT EXISTS refs
 	symbol INTEGER NOT NULL REFERENCES symbols(id) ON DELETE CASCADE
 );
 
+CREATE  TABLE IF NOT EXISTS relationships
+(
+	id INTEGER PRIMARY KEY,
+	parent INTEGER NOT NULL REFERENCES symbols(id) ON DELETE CASCADE,
+	child INTEGER NOT NULL REFERENCES symbols(id) ON DELETE CASCADE
+);
+
 CREATE VIEW IF NOT EXISTS  fully_qualified_symbols
 (
 	sid, name, type, aid, file, start_line, start_char, stop_line, stop_char, path

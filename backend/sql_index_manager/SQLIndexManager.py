@@ -133,6 +133,16 @@ class SQLIndexManager:
 		with self.db:
 			self.db.executemany("INSERT INTO refs(anchor, symbol) VALUES (?,?)",data)
 
+	def add_symbol_relationship(self,parent_id : int, child_id : int) -> int:
+		"""
+		Add a relationship (parent/child) between two symbols.
+		:param parent_id: DB ID of the parent symbol.
+		:param child_id: SB ID of the child symbol.
+		:return: the ID of the relationship
+		"""
+		with self.db:
+			self.db.execute("INSERT INTO relationships(parent,child) VALUES (?,?)", (parent_id, child_id))
+
 	def get_symbols_by_name(self,name : str) -> T.List[SQLSymbol]:
 		"""
 		Retrieve data and return according Symbols objects for a given name.
@@ -145,6 +155,19 @@ class SQLIndexManager:
 			results_items = [SQLSymbol.from_fully_qualified_sql_record(x) for x in results]
 
 		return results_items
+
+	def get_symbol_childs(self,parent : SQLSymbol) -> T.List[SQLSymbol]:
+		"""
+		Retrieve a list of all childrens for this symbol
+		:param parent: The symbol to lookup childs from.
+		:return: A list of found childs.
+		"""
+		ret = list()
+		with self.db :
+			results = self.db.execute("SELECT * FROM fully_qualified_symbols WHERE sid IN "
+									  " ( SELECT child FROM relationships WHERE parent == ? )",[parent.id]).fetchall()
+			ret = [SQLSymbol.from_fully_qualified_sql_record(x) for x in results]
+		return ret
 
 	def get_symbol_references(self, symbol : SQLSymbol) -> T.List[SQLAnchor]:
 		"""
@@ -258,6 +281,8 @@ class SQLIndexManager:
 			gc.enable()
 
 	def _process_kythe_node(self, node_content : JSONRecord):
+		if node_content.source.signature == "" and node_content.source.path == "" :
+			return
 		if node_content.is_file :
 			self._file_id_mapping[node_content.source.path] = self.add_file(node_content.source.path,node_content.facts["/kythe/text"])
 			return
@@ -268,6 +293,7 @@ class SQLIndexManager:
 		if node_content.is_symbol :
 			self._signature_cache[node_content.source.signature] = self.add_symbol(node_content.source.signature,node_content.symbol_type,None)
 			return
+
 		if node_content.is_edge :
 			if node_content.edge_kind in ["/defines/binding"]:
 				anchor_signature = node_content.source.signature
@@ -284,6 +310,13 @@ class SQLIndexManager:
 
 			if node_content.edge_kind in ["/ref"]:
 				self.add_ref(self._signature_cache[node_content.source.signature], self._signature_cache[node_content.target.signature])
+			if node_content.edge_kind in ["/childof"] :
+				if node_content.target.signature not in self._signature_cache or node_content.source.signature not in self._signature_cache :
+					# This might be due to a file being the parent.
+					return
+				parent_id = self._signature_cache[node_content.target.signature]
+				child_id = self._signature_cache[node_content.source.signature]
+				self.add_symbol_relationship(parent_id,child_id)
 			else:
 				return
 		return

@@ -60,7 +60,7 @@ class VeribleIndexer :
 				ret.append(os.path.join(self.workspace_root,p))
 		return ret
 
-	def dump_json_index(self, path):
+	def dump_json_index(self, path, kind = "json_debug"):
 		data = None
 		with tempfile.TemporaryDirectory() as work_dir:
 			filelist = f"{work_dir}/files.fls"
@@ -72,7 +72,7 @@ class VeribleIndexer :
 					   "/",
 					   # self.workspace_root,
 					   "--print_kythe_facts",
-					   "json_debug",
+					   kind,
 					   "--include_dir_paths",
 					   incdir_list,
 					   "--file_list_path",
