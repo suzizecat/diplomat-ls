@@ -121,14 +121,21 @@ class SQLFile:
 
 	def offset_from_position(self,line : int, char : int):
 		# Lets assume first line = 0
-		logger.debug(f"Query offset for {line}:{char}")
-		line_start = 0
-		for i in range(line) :
-			line_start = self.content.find("\n",line_start +1)
-			if line_start == -1 :
-				logger.warning(f"offset_from_position : offset not found for position {line}:{char} inf file {self.path}")
-				return -1
-		return line_start + char - (1 if line_start == 0 else 0)
+
+		position = 0
+		line_start = self.content.find("\n")
+		if line == 0 :
+			line_start = 0
+		else :
+			for i in range(line-1) :
+				line_start = self.content.find("\n",line_start +1)
+				if line_start == -1 :
+					logger.warning(f"offset_from_position : offset not found for position {line}:{char} in file {self.path}")
+					return -1
+		position = line_start + char - (1 if line_start == 1 else 0)
+
+		logger.debug(f"Query offset for {line}:{char} got {position} on file {self.path}")
+		return position
 
 
 class SQLAnchor:
