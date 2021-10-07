@@ -203,16 +203,34 @@ def reindex_all(ls : DiplomatLanguageServer, *args):
 		get_client_config(ls)
 	else :
 		ls.svindexer.clear()
-		if not ls.skip_index :
-			ls.show_message_log(f"Reindex using file {os.path.abspath(ls.flist_path)}")
-			ls.svindexer.read_file_list(ls.flist_path)
-			ls.svindexer.run_indexer()
+		ls.clear_diagnostics()
+		ls.indexed = False
+		try :
+			if not ls.skip_index :
+				ls.show_message_log(f"Reindex using file {os.path.abspath(ls.flist_path)}")
+				ls.svindexer.read_file_list(ls.flist_path)
+				ls.svindexer.run_indexer()
+			else :
+				ls.show_message_log(f"Reindex using file {os.path.abspath(ls.index_path)}")
+				ls.svindexer.read_index_file(ls.index_path)
+		except IndexingError :
+			ls.show_message_log(f"Reindex failed")
+			ls.syntax_check()
+			ls.indexed = False
 		else :
-			ls.show_message_log(f"Reindex using file {os.path.abspath(ls.index_path)}")
-			ls.svindexer.read_index_file(ls.index_path)
+			ls.indexed = True
+			ls.show_message("Indexing done")
 
-		ls.indexed = True
-		ls.show_message("Indexing done")
+@diplomat_server.thread()
+@diplomat_server.feature(COMPLETION)
+def provide_completion(ls : DiplomatLanguageServer, params : CompletionParams ) -> CompletionList :
+	ls.show_message_log("Require completion...")
+	document = ls.workspace.get_document(params.text_document.uri)
+	position = params.position
+
+	complete_items = ls.get_completion(document, position)
+	logger.debug(f"Found completion items : {complete_items}")
+	return CompletionList(is_incomplete = False, items=[CompletionItem(label=x) for x in complete_items])
 
 # As we don't have type resolution from Verible, that's useless.
 # @diplomat_server.thread()

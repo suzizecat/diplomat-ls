@@ -28,6 +28,7 @@ class VeribleSyntaxChecker(GenericChecker):
 		self._run(incr=True,force_fset = files)
 
 	def _run(self,incr = False, force_fset : T.Optional[T.List[str]] = None):
+		self.clear()
 		with tempfile.TemporaryDirectory() as work_dir:
 			filelist = self.filelist if force_fset is None else force_fset
 			command = [self.executable]

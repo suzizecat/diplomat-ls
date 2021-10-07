@@ -94,6 +94,12 @@ class DiplomatLanguageServer(LanguageServer):
 		for file,diaglist in self.syntaxchecker.diagnostic_content.items() :
 			self.publish_diagnostics(file,diaglist)
 
+	def clear_diagnostics(self):
+		self.syntaxchecker.clear()
+		for file,diaglist in self.syntaxchecker.diagnostic_content.items() :
+			self.publish_diagnostics(file,diaglist)
+
+
 	def anchor_to_location(self,anchor : SQLAnchor) -> Location:
 		file_path = self.svindexer.index.get_file_by_id(anchor.file).path
 
