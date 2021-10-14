@@ -84,11 +84,12 @@ class DiplomatLanguageServer(LanguageServer):
 	def have_syntax_error(self):
 		return self.syntaxchecker.nberrors > 0
 
-	def syntax_check(self,file : str):
+	def syntax_check(self,file : str = None):
 		if file is not None :
 			f = uris.to_fs_path(file)
 			self.syntaxchecker.run_incremental([f])
 		else :
+			self.syntaxchecker.filelist = self.svindexer.filelist
 			self.syntaxchecker.run()
 
 		for file,diaglist in self.syntaxchecker.diagnostic_content.items() :
@@ -117,7 +118,8 @@ class DiplomatLanguageServer(LanguageServer):
 		logger.debug(f"Query symbol for location {selected_loc}")
 		#wsdoc = self.workspace.get_document(selected_loc.uri)
 		db_file = self.svindexer.index.get_file_by_path(uris.to_fs_path(selected_loc.uri))
-
+		if db_file is None :
+			return None
 		anchors_by_pos : T.List[SQLAnchor] = self.svindexer.index.get_anchor_by_position(db_file.id,selected_loc.range.start.line,selected_loc.range.start.character)
 		logger.debug(f"    Anchor found {anchors_by_pos}")
 		if len(anchors_by_pos) == 0 :
@@ -156,6 +158,29 @@ class DiplomatLanguageServer(LanguageServer):
 		logger.debug("Got configuration back")
 		self.show_message_log("Got client configuration.")
 		return config
+
+	def get_completion(self, document, position):
+		ret = list()
+		current_word = document.word_at_position(position)
+		logger.debug(f"  Current word is {current_word}")
+		word_start = Position(line=position.line, character=position.character - len(current_word))
+		if word_start.character > 0:
+			prev_char_offset = document.offset_at_position(word_start) - 1
+			previous_char = document.source[prev_char_offset]
+			logger.debug(f"  Previous char is {previous_char}")
+			if previous_char == ".":
+				# We need the parent and to find children
+				parent_start = Position(line=word_start.line, character=word_start.character - 2)
+				parent_name =document.word_at_position(parent_start)
+				logger.debug(f"  Parent is {parent_name}")
+				parent_symbol_list = self.svindexer.index.get_symbols_by_name( parent_name)
+				logger.debug(f"   Found {parent_symbol_list}")
+				children = list()
+				for parent_symbol in parent_symbol_list :
+					children.extend(self.svindexer.index.get_symbol_childs(parent_symbol))
+				return [x.name for x in children if x.name.startswith(current_word)]
+
+		return ret
 
 	def get_completion(self, document, position):
 		ret = list()

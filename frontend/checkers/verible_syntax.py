@@ -38,23 +38,20 @@ class VeribleSyntaxChecker(GenericChecker):
 
 			logger.info(f"Run syntax checker command {' '.join(command)}")
 
-			error_return = f"{work_dir}/syntax-check.json"
-			with open(error_return, "w") as error_file:
-				process = Popen(command, stdout=error_file, stderr=PIPE)
-				(t, err) = process.communicate()
-				exit_code = process.wait()
+			process = Popen(command, stdout=PIPE, stderr=PIPE)
+			(data, err) = process.communicate()
+			exit_code = process.wait()
 
 			if exit_code not in (0,1) or err != b"":
 				err_string = f"Error when running the syntax checker. Output code {exit_code}\n{err.decode('ascii')}"
 				for line in err_string.split("\n"):
 					logger.error(line)
 				return
-
 			if not incr:
 				self.clear()
 			# If no error found, will return 0
 			if exit_code == 1 :
-				self.read_error_file(error_return)
+				self.process_error_report(data.decode('ascii'))
 
 	def _register_diagnostic(self, uri : str, d : Diagnostic):
 		if d.severity == DiagnosticSeverity.Error :
@@ -63,23 +60,30 @@ class VeribleSyntaxChecker(GenericChecker):
 			self.diagnostic_content[uri] = list()
 		self.diagnostic_content[uri].append(d)
 
+	def process_error_report(self, jscontent : str):
+		data = json.loads(jscontent)
+		for file, content in data.items():
+			uri = from_fs_path(file)
+			if content is None :
+				continue
+			for severity_label, record_list in content.items():
+				severity = DiagnosticSeverity.Error
+				# To change if we have something else than error
+				for r in record_list:
+					position = Position(line=r["line"], character=r["column"])
+					diagnostic = Diagnostic(range=Range(start=position, end=position),
+											message=f"Parse error : rejected token '{r['text']}'",
+											source="Verible Syntax",
+											code="syntax-error",
+											severity=severity)
+					logger.info(f"Register error {uri}:{r['line']}")
+					self._register_diagnostic(uri, diagnostic)
+
 	def read_error_file(self,path : str):
 		with open(path,"r") as jsfile :
-			data = json.load(jsfile)
-			for file, content in data.items() :
-				uri = from_fs_path(file)
-				for severity_label, record_list in content.items() :
-					severity = DiagnosticSeverity.Error
-					# To change if we have something else than error
-					for r in record_list :
-						position = Position(line=r["line"],character=r["column"])
-						diagnostic = Diagnostic(range = Range(start=position,end=position),
-												message = "Parse error : rejected token.  ",
-												source="Verible Syntax",
-												code="syntax-error",
-												severity=severity)
-						logger.info(f"Register error {uri}:{r['line']}")
-						self._register_diagnostic(uri, diagnostic)
+			self.process_error_report(jsfile.read())
+
+
 
 
 

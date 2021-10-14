@@ -32,6 +32,7 @@ from pygls.lsp.types import (DidOpenTextDocumentParams,
 
 from backend.sql_index_manager import SQLAnchor
 
+from frontend import IndexingError
 logger = logging.getLogger("myLogger")
 
 
@@ -197,29 +198,33 @@ def get_client_config(ls: DiplomatLanguageServer, *args):
 @diplomat_server.thread()
 @diplomat_server.command(DiplomatLanguageServer.CMD_REINDEX)
 def reindex_all(ls : DiplomatLanguageServer, *args):
+	ls.show_message_log(f"Reindex requested.")
 	if not ls.configured :
 		ls.show_message("You need to update server configuration before indexing")
 		ls.show_message_log(f"Trying to update the configuration")
 		get_client_config(ls)
 	else :
+		ls.show_message_log(f"  Clear index.")
 		ls.svindexer.clear()
+		ls.show_message_log(f"  Clear diagnostics.")
 		ls.clear_diagnostics()
 		ls.indexed = False
 		try :
 			if not ls.skip_index :
-				ls.show_message_log(f"Reindex using file {os.path.abspath(ls.flist_path)}")
+				ls.show_message_log(f"  Reindex using file {os.path.abspath(ls.flist_path)}")
 				ls.svindexer.read_file_list(ls.flist_path)
+				ls.show_message_log(f"  Running indexer")
 				ls.svindexer.run_indexer()
 			else :
-				ls.show_message_log(f"Reindex using file {os.path.abspath(ls.index_path)}")
+				ls.show_message_log(f"  Reindex using file {os.path.abspath(ls.index_path)}")
 				ls.svindexer.read_index_file(ls.index_path)
 		except IndexingError :
-			ls.show_message_log(f"Reindex failed")
+			ls.show_message_log(f"  Reindex failed")
 			ls.syntax_check()
 			ls.indexed = False
 		else :
 			ls.indexed = True
-			ls.show_message("Indexing done")
+			ls.show_message_log("  Indexing done")
 
 @diplomat_server.thread()
 @diplomat_server.feature(COMPLETION)

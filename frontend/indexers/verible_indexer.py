@@ -126,7 +126,9 @@ class VeribleIndexer :
 			self.read_index_file(index_path)
 
 	def read_index_file(self, index_path):
+		logger.info(f"Processing index...")
 		self.index.read_kythe_index(index_path)
+		logger.info(f"    Done.")
 
 
 # Press the green button in the gutter to run the script.
